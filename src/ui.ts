@@ -60,6 +60,24 @@ function firstLines(text: string, count: number): string {
   return lines.length > count ? `${shown}\n...` : shown;
 }
 
+/**
+ * Markdown either way, so ctrl+o changes how much is shown and not how it looks. Collapsed,
+ * the first `count` non-empty lines and a dim count of the rest.
+ */
+function markdownPreview(text: string, expanded: boolean, count: number, theme: Theme): Container {
+  const container = new Container();
+  const lines = text.split('\n').filter((line) => line.trim());
+  if (expanded || lines.length <= count) {
+    container.addChild(markdown(text, theme));
+    return container;
+  }
+  container.addChild(markdown(lines.slice(0, count).join('\n'), theme));
+  container.addChild(
+    new Text(theme.fg('dim', `... ${lines.length - count} more lines, ctrl+o to expand`), 0, 0)
+  );
+  return container;
+}
+
 export const foldRenderers = {
   renderCall(args: { since?: string; note?: string }, theme: Theme): Text {
     const since = args.since ? theme.fg('accent', args.since) : theme.fg('dim', '...');
@@ -147,10 +165,10 @@ export const askRenderers = {
     result: AgentToolResult<AskDetails | undefined>,
     { expanded }: { expanded: boolean },
     theme: Theme
-  ): Text | Markdown {
+  ): Text | Container {
     const text = resultText(result.content);
-    if (!expanded) return new Text(theme.fg('toolOutput', firstLines(text, 4)), 0, 0);
-    return markdown(text, theme);
+    if (result.isError) return new Text(theme.fg('error', firstLines(text, 6)), 0, 0);
+    return markdownPreview(text, expanded, 6, theme);
   }
 };
 
