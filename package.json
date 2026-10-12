@@ -1,6 +1,6 @@
 {
   "name": "pi-episodes",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fold finished episodes out of pi's context, and recall, ask or fork them instead of compacting",
   "keywords": [
     "pi-package",
@@ -70,7 +70,8 @@
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "pi": {
     "extensions": [
