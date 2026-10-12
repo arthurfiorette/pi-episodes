@@ -1,35 +1,17 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { archiveDir, type Thread, ThreadIndex } from './archive.js';
 import { messageText } from './messages.js';
+import { excerpt, RecallIndex, type RecallMatch, type SearchableThread } from './search.js';
 import { readStamp, stampLabel } from './stamps.js';
 import type { EpisodeState } from './state.js';
 import { type RecallDetails, recallRenderers } from './ui.js';
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 200;
-const LINE_WIDTH = 240;
-
-export interface RecallMatch {
-  handle: string;
-  turn: string | undefined;
-  role: string;
-  line: string;
-}
-
-function excerpt(line: string, index: number, length: number): string {
-  const text = line.trim();
-  if (text.length <= LINE_WIDTH) return text;
-  const offset = line.length - line.trimStart().length;
-  const center = Math.max(0, index - offset);
-  const start = Math.max(0, Math.min(center - LINE_WIDTH / 3, text.length - LINE_WIDTH));
-  const end = Math.min(text.length, start + Math.max(LINE_WIDTH, length));
-  return `${start > 0 ? '...' : ''}${text.slice(start, end)}${end < text.length ? '...' : ''}`;
-}
 
 export function createMatcher(
   query: string,
@@ -50,11 +32,11 @@ export function createMatcher(
 }
 
 /**
- * Greps every line a thread held. Lines are attributed to the newest stamp seen so far,
- * which is the turn the model would cite to find its way back.
+ * Greps every line a thread held, for quoted and regex queries. Lines are attributed to the
+ * newest stamp seen so far, which is the turn the model would cite to find its way back.
  */
-export function searchThreads(
-  threads: readonly { handle: string; messages: readonly AgentMessage[] }[],
+export function grepThreads(
+  threads: readonly SearchableThread[],
   match: (line: string) => { index: number; length: number } | undefined
 ): RecallMatch[] {
   const matches: RecallMatch[] = [];
@@ -123,12 +105,17 @@ export async function staleness(
 }
 
 const RecallParams = Type.Object({
-  query: Type.String({ description: 'Text to find, such as an error string, symbol or path.' }),
+  query: Type.String({
+    description:
+      'Words to find, such as an error code, symbol, path or a few words of what happened. Wrap it in double quotes to match that exact text instead.'
+  }),
   handle: Type.Optional(
     Type.String({ description: 'Only search this archived thread, such as "ep-1a2b3c4d".' })
   ),
   regex: Type.Optional(
-    Type.Boolean({ description: 'Treat query as a case-insensitive regular expression.' })
+    Type.Boolean({
+      description: 'Treat query as a case-insensitive regular expression, matched per line.'
+    })
   ),
   limit: Type.Optional(
     Type.Integer({
@@ -144,8 +131,8 @@ export function registerRecall(pi: ExtensionAPI, state: EpisodeState): void {
     name: 'recall',
     label: 'Recall',
     description:
-      'Search the archived threads (folded spans and finished forks) for exact text: tool outputs, your own messages and reasoning, commands and their arguments. Returns matching lines with the thread handle and turn they came from; matches past the limit go to a file. Cheap, no model call. Query for the specific thing you need; it is a grep, not a way to read a span back.',
-    promptSnippet: 'Grep archived threads (folded spans, forks) for exact text',
+      'Search the archived threads (folded spans and finished forks): tool outputs, your own messages and reasoning, commands and their arguments. Ranked by relevance: messages holding every word come first, in any order, and rare words such as error codes weigh more than common ones. Returns the best line of each match with the thread handle and turn it came from; matches past the limit go to a file. A "quoted" query or regex matches exact text per line instead. Cheap, no model call. Query for the specific thing you need; it is not a way to read a span back.',
+    promptSnippet: 'Search archived threads (folded spans, forks) by keyword or exact text',
     parameters: RecallParams,
     renderCall: recallRenderers.renderCall,
     renderResult: recallRenderers.renderResult,
@@ -168,15 +155,28 @@ export function registerRecall(pi: ExtensionAPI, state: EpisodeState): void {
         };
       }
 
-      let matcher: ReturnType<typeof createMatcher>;
-      try {
-        matcher = createMatcher(params.query, params.regex === true);
-      } catch (error) {
-        throw new Error(`Invalid regular expression: ${(error as Error).message}`);
+      const quoted = /^"(.+)"$/s.exec(params.query.trim())?.[1];
+      let all: RecallMatch[];
+      let partial = false;
+      if (params.regex || quoted !== undefined) {
+        let matcher: ReturnType<typeof createMatcher>;
+        try {
+          matcher = createMatcher(params.regex ? params.query : quoted!, params.regex === true);
+        } catch (error) {
+          throw new Error(`Invalid regular expression: ${(error as Error).message}`);
+        }
+        all = grepThreads(threads, matcher);
+      } else {
+        // Built on the first recall of the session and only ever added to.
+        state.recallIndex ??= new RecallIndex();
+        state.recallIndex.add(threads);
+        ({ matches: all, partial } = state.recallIndex.search(
+          params.query,
+          new Set(threads.map((thread) => thread.handle))
+        ));
       }
 
       const limit = params.limit ?? DEFAULT_LIMIT;
-      const all = searchThreads(threads, matcher);
       const matches = all.slice(0, limit);
       const total = all.length;
       const details: RecallDetails = {
@@ -201,7 +201,11 @@ export function registerRecall(pi: ExtensionAPI, state: EpisodeState): void {
         matches.some((found) => found.handle === thread.handle)
       );
       // Staleness goes first: a cue only works if it is seen before the matches are acted on.
-      const lines = [...(await staleness(state, hitThreads)), ...matches.map(formatMatch)];
+      const lines = [
+        ...(await staleness(state, hitThreads)),
+        ...(partial ? ['No message holds every word of the query; these hold some of them.'] : []),
+        ...matches.map(formatMatch)
+      ];
       if (total > matches.length) {
         const file = await spill(archiveDir(ctx.sessionManager), params.query, all);
         lines.push(

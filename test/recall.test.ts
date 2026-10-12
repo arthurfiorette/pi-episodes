@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createMatcher, searchThreads } from '../src/recall.js';
+import { createMatcher, grepThreads } from '../src/recall.js';
 import { assistant, call, result, user } from './helpers.js';
 
 const thread = {
@@ -14,7 +14,7 @@ const thread = {
 };
 
 test('finds lines in tool output, user text and the agent own messages', () => {
-  const matches = searchThreads([thread], createMatcher('ts2322', false));
+  const matches = grepThreads([thread], createMatcher('ts2322', false));
 
   assert.equal(matches.length, 2);
   assert.deepEqual(
@@ -28,13 +28,13 @@ test('finds lines in tool output, user text and the agent own messages', () => {
 });
 
 test('searches tool call arguments and supports regular expressions', () => {
-  const matches = searchThreads([thread], createMatcher('pnpm\\s+build', true));
+  const matches = grepThreads([thread], createMatcher('pnpm\\s+build', true));
   assert.equal(matches.length, 1);
   assert.match(matches[0]!.line, /bash\(\{"command":"pnpm build"\}\)/);
 });
 
 test('returns every match so the caller can cap and spill the rest', () => {
-  const matches = searchThreads([thread, { ...thread, handle: 'ep-2' }], createMatcher('e', false));
+  const matches = grepThreads([thread, { ...thread, handle: 'ep-2' }], createMatcher('e', false));
   assert.ok(matches.length > 3);
   assert.deepEqual(new Set(matches.map((match) => match.handle)), new Set(['ep-1', 'ep-2']));
 });

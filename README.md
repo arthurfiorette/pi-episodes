@@ -12,7 +12,7 @@
 
 **Fold finished work out of the context instead of compacting it.** A [pi](https://github.com/earendil-works/pi) package that lets the agent close an episode, such as a build loop, into a short note while the full span stays archived, searchable and askable.
 
-Compaction summarizes the whole session at once, when the window fills. `pi-episodes` asks the agent to summarize one piece of work when that work ends: "the build passes, where was I?". The span leaves the context, a note takes its place, and the agent can still grep it or question it later. The same archive backs `fork`, which runs a copy of the agent with its current context instead of a subagent that starts from an empty prompt.
+Compaction summarizes the whole session at once, when the window fills. `pi-episodes` asks the agent to summarize one piece of work when that work ends: "the build passes, where was I?". The span leaves the context, a note takes its place, and the agent can still search it or question it later. The same archive backs `fork`, which runs a copy of the agent with its current context instead of a subagent that starts from an empty prompt.
 
 > [!WARNING]
 > This is an experiment. Whether a model notices when an episode ends, and writes notes that keep the caveats a later step needs, is exactly what it is meant to find out. Pi's normal compaction stays enabled as a fallback.
@@ -74,7 +74,7 @@ A fold happens when the main goal of an episode is met, which is when trailing s
 | Tool | What it does | Cost |
 | --- | --- | --- |
 | `fold(since, note)` | Replaces the span starting at `since` with `note` and archives it. | One tool call. With Anthropic, the cache is rewritten from the newest fold note or user message before the span (see [Prompt caching](#prompt-caching)). |
-| `recall(query)` | Greps the archived spans and forks on the current branch: tool outputs, the agent's own messages and reasoning, tool arguments. Returns lines with their handle and turn. With a handle, it searches that thread on any branch. Matches past the limit (30 by default, 200 at most) are written to a file next to the fork transcripts, so a broad query costs a path, not the context. | No model call. |
+| `recall(query)` | Searches the archived spans and forks on the current branch: tool outputs, the agent's own messages and reasoning, tool arguments. Results are ranked with BM25+ ([MiniSearch](https://github.com/lucaong/minisearch)): messages holding every word first, in any order, rare words such as error codes weighing more than common ones, with prefixes and small typos tolerated on plain words but never on codes or paths. A `"quoted"` query or `regex: true` matches exact text per line instead. Returns the best line of each match with its handle and turn. With a handle, it searches that thread on any branch. Matches past the limit (30 by default, 200 at most) are written to a file next to the fork transcripts, so a broad query costs a path, not the context. | No model call. |
 | `ask(handle, question)` | Resumes an archived thread with everything it held, asks one question, returns only the answer. | One model call over the thread's context, cached if the provider still has it. |
 | `fork(task)` | Runs a copy of the agent, starting from its current context, until the task is done, and returns its final note plus what changed on disk. Tool calls go through the parent's tools, hooks and permissions. | The child's prefix is the parent's, so it reads from the parent's cache while that is alive; each child turn re-reads the whole prefix at the cached price, and parallel forks each write their own tail. |
 
@@ -106,6 +106,7 @@ With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note o
 | Stamps, notes, fold and fork records, open-item reminders | The session file: on the messages and tool results themselves, plus a marker entry per applied fold and a custom message per reminder |
 | Fork transcripts | `<session>.episodes/<handle>.json` next to the session file, or memory for `--no-session` |
 | Recall overflow | `<session>.episodes/recall-<time>-<query>.txt`, or the OS temp directory for `--no-session` |
+| Recall search index | Memory only: built on the first ranked `recall` of a session from the archive, then added to as threads are archived |
 | Working tree snapshots | A private git index and object store in the OS temp directory, using the repository's objects read-only; removed when the session ends. The repository's index, stash and `.git/objects` are never written |
 
 <br />

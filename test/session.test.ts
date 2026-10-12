@@ -266,10 +266,12 @@ test('points back to a folded span when its files are touched or changed again',
         assert.doesNotMatch(text(conversation(context).at(-1)!), /was also touched/);
         return fauxAssistantMessage(fauxToolCall('bash', { command: 'printf two > a.txt' }));
       },
-      () => fauxAssistantMessage(fauxToolCall('recall', { query: 'printf one' })),
+      // Quoted: an exact substring, as the command was written.
+      () => fauxAssistantMessage(fauxToolCall('recall', { query: '"printf one >"' })),
       (context) => {
         const result = text(conversation(context).at(-1)!);
         assert.match(result, new RegExp(`${handle} predates changes to: a\\.txt`));
+        assert.match(result, /assistant: bash\(\{"command":"printf one > a\.txt"\}\)/);
         return fauxAssistantMessage('done');
       }
     ],

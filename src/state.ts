@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 import type { ContextEditEntryDraft, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { ForkArchive } from './archive.js';
+import type { RecallIndex } from './search.js';
 import { Snapshots } from './snapshots.js';
 import { readStamp } from './stamps.js';
 
@@ -30,6 +31,8 @@ export class EpisodeState {
   manualFold = false;
   /** Forks in progress, for the footer status. */
   runningForks = 0;
+  /** Built on the first ranked recall; rebuilt per session rather than stored, it is derived. */
+  recallIndex: RecallIndex | undefined;
 
   reset(ctx: ExtensionContext): void {
     void this.snapshots?.dispose();
@@ -40,6 +43,7 @@ export class EpisodeState {
     this.forkArchives.clear();
     this.manualFold = false;
     this.runningForks = 0;
+    this.recallIndex = undefined;
 
     // Stamps must stay unique across every branch of the session file, so `since` always
     // resolves to exactly one message.

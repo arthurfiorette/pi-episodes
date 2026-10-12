@@ -1,6 +1,6 @@
 {
   "name": "pi-episodes",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Fold finished episodes out of pi's context, and recall, ask or fork them instead of compacting",
   "keywords": [
     "pi-package",
@@ -38,6 +38,9 @@
     "prepack": "pnpm build",
     "test": "tsx --test test/*.test.ts",
     "test-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "minisearch": "^7.2.0"
   },
   "devDependencies": {
     "@arthurfiorette/biomejs-config": "^2.0.1",

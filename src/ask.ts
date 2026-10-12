@@ -35,7 +35,7 @@ export function registerAsk(pi: ExtensionAPI, state: EpisodeState): void {
     name: 'ask',
     label: 'Ask',
     description:
-      'Ask an archived thread (folded span or finished fork) one question. The thread is resumed with everything it held, answers once without acting, and only the answer comes back. Use recall instead when you know the exact text to look for.',
+      'Ask an archived thread (folded span or finished fork) one question. The thread is resumed with everything it held, answers once without acting, and only the answer comes back. Use recall instead when searching for words or exact text will do.',
     promptSnippet: 'Ask an archived thread a question; it answers from its full context',
     parameters: AskParams,
     renderCall: askRenderers.renderCall,
