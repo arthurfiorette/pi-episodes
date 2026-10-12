@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseStamp, readStamp, withStamp } from '../src/stamps.js';
+import { parseStamp, readStamp, unstampedText, withStamp } from '../src/stamps.js';
 import { result, user } from './helpers.js';
 
 test('stamps are a trailing block that leaves the original text intact', () => {
@@ -23,4 +23,12 @@ test('since accepts the forms the model is likely to write', () => {
   assert.equal(parseStamp(' T12 '), 12);
   assert.equal(parseStamp('12'), 12);
   assert.equal(parseStamp('turn 12'), undefined);
+});
+
+test('a copied stamp is replaced, not kept next to the new one', () => {
+  assert.deepEqual(withStamp(withStamp('hello', 3), 9), [
+    { type: 'text', text: 'hello' },
+    { type: 'text', text: '[t9]' }
+  ]);
+  assert.equal(unstampedText(withStamp('hello', 3)), 'hello');
 });

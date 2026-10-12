@@ -59,7 +59,13 @@ The harness extends the note with what changed on disk during the span, the stam
 
 Nothing is deleted. A fold appends `context_edit` entries to the session, which only change what the model sees from then on; `/tree`, exports and the session file still hold the full span. A fold cannot reach back past the previous note, so notes on one line never contain each other.
 
-On screen, the folded messages stay where they were. What marks the fold is its own block (`▸ ep-1a2b3c4d  4 messages, ~41k tokens archived` with the note behind ctrl+o), a notification, and the footer status. See [Limitations](#limitations) for why the span itself does not collapse.
+On screen, the folded messages stay where they were. What marks the fold is its own block (`▸ ep-1a2b3c4d t13-t27  4 messages, ~41k tokens archived`, with the note behind ctrl+o), a notification, and the footer status. The range is the stamps the span covered, so you can see which turns left the model's context. See [Limitations](#limitations) for why the span itself does not collapse.
+
+A fold happens when the main goal of an episode is met, which is when trailing steps ("remove the debug flag") and parked work are most easily forgotten. So on the next prompt you send after a fold, the harness adds one short message listing the open items of the notes folded since the last such reminder, newest first and capped at about 300 tokens. It is appended once, never edited, so it does not disturb the prompt cache. Turn it off or change the cap in pi's `settings.json`:
+
+```json
+{ "episodes": { "openReminder": false, "openReminderMaxTokens": 300 } }
+```
 
 <br />
 
@@ -67,19 +73,19 @@ On screen, the folded messages stay where they were. What marks the fold is its 
 
 | Tool | What it does | Cost |
 | --- | --- | --- |
-| `fold(since, note)` | Replaces the span starting at `since` with `note` and archives it. | One tool call. The cache is rewritten from the newest fold note or user message before the span (see [Prompt caching](#prompt-caching)). |
+| `fold(since, note)` | Replaces the span starting at `since` with `note` and archives it. | One tool call. With Anthropic, the cache is rewritten from the newest fold note or user message before the span (see [Prompt caching](#prompt-caching)). |
 | `recall(query)` | Greps the archived spans and forks on the current branch: tool outputs, the agent's own messages and reasoning, tool arguments. Returns lines with their handle and turn. With a handle, it searches that thread on any branch. Matches past the limit (30 by default, 200 at most) are written to a file next to the fork transcripts, so a broad query costs a path, not the context. | No model call. |
 | `ask(handle, question)` | Resumes an archived thread with everything it held, asks one question, returns only the answer. | One model call over the thread's context, cached if the provider still has it. |
-| `fork(task)` | Runs a copy of the agent, starting from its current context, until the task is done, and returns its final note plus what changed on disk. Tool calls go through the parent's tools, hooks and permissions. | The child's prefix is the parent's, so it is a cache hit on every child turn. |
+| `fork(task)` | Runs a copy of the agent, starting from its current context, until the task is done, and returns its final note plus what changed on disk. Tool calls go through the parent's tools, hooks and permissions. | The child's prefix is the parent's, so it reads from the parent's cache while that is alive; each child turn re-reads the whole prefix at the cached price, and parallel forks each write their own tail. |
 
 Two cues help the agent go back when it does not know it should:
 
-- **File touch:** when `read`, `edit` or `write` touches a file that a folded span or fork changed or used, the result says so once per file, with the handle.
-- **Staleness:** `recall` and `ask` mention when files a thread relied on have changed since it was archived.
+- **File touch:** when `read`, `edit` or `write` touches a file that a folded span or fork changed or used, the result names the thread, at most the two newest ones, once for each thread and file. It fires on edits after the change is made, and not at all for files touched through the shell; spans that only read a file trigger it too.
+- **Staleness:** `recall` and `ask` start their result with the files a thread relied on that have changed since it was archived.
 
-`fork` is meant for work that continues the agent's own, such as making the build pass. It is deliberately not a reviewer: a review is useful because it does not share the author's assumptions.
+`fork` is meant for long work that continues the agent's own, such as making the build pass. It is deliberately not a reviewer: a review is useful because it does not share the author's assumptions. The other half of the post, a separate agent consulted on purpose and handed the user's requests without the agent's reasoning, is not built here; the prompt only tells the model how to brief one if it has such a tool.
 
-While a fork runs, a widget above the editor shows its turn, elapsed time and current tool. `ctrl+shift+e` or `/forks` opens an overlay with every fork of the session, running or finished, and the child's transcript as it grows: tab switches fork, arrows scroll, esc closes.
+While a fork runs, a widget above the editor shows its turn, elapsed time and current tool. `ctrl+shift+e` or `/forks` opens an overlay with the forks started in this pi process, running or finished, and the child's transcript as it grows: tab switches fork, arrows scroll, esc closes. After a restart, `/episodes`, `recall` and `ask` still reach earlier forks; the overlay does not.
 
 <br />
 
@@ -87,9 +93,9 @@ While a fork runs, a widget above the editor shows its turn, elapsed time and cu
 
 Each request reads and refreshes only its longest matching cache entry. During a long episode, the entry where the episode started is no longer the longest match, so it expires, and the fold that ends the episode would rewrite everything before it.
 
-With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note or user message, whichever is later. A fold cannot start before the latest note, and episodes usually start after a user message, so that is the closest point before the next fold that is already known; the fold rewrites the cache from there on. With an API key, pi leaves one of the four breakpoints free and it is used. With OAuth all four are taken, so the breakpoint of the required "You are Claude Code" block moves instead. Anthropic caches tools, then system, then messages, and the system prompt's own breakpoint already covers that block, so nothing that was cached before stops being cached.
+With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note or user message, whichever is later. A fold cannot start before the latest note, so that is the closest point before the next fold that is already known; the fold rewrites the cache from there on. When one user request holds several episodes, the anchor sits on that request and a fold also rewrites the episodes before it in the same request; how much that costs in practice is measurement 1 in [MEASUREMENTS.md](MEASUREMENTS.md). With an API key, pi leaves one of the four breakpoints free and it is used. With OAuth all four are taken, so the breakpoint of the required "You are Claude Code" block moves instead. Anthropic caches tools, then system, then messages, and the system prompt's own breakpoint already covers that block, so nothing that was cached before stops being cached.
 
-`ask` and `fork` send the same session id, prompt, tools and thinking settings as the main thread, so their prefixes match it byte for byte.
+`ask` and `fork` send the same session id, prompt, tools and thinking settings as the main thread, so their message prefixes match it; see [Limitations](#limitations) for what of pi's request pipeline they skip.
 
 <br />
 
@@ -97,7 +103,7 @@ With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note o
 
 | Data | Location |
 | --- | --- |
-| Stamps, notes, fold and fork records | The session file, on the messages and tool results themselves |
+| Stamps, notes, fold and fork records, open-item reminders | The session file: on the messages and tool results themselves, plus a marker entry per applied fold and a custom message per reminder |
 | Fork transcripts | `<session>.episodes/<handle>.json` next to the session file, or memory for `--no-session` |
 | Recall overflow | `<session>.episodes/recall-<time>-<query>.txt`, or the OS temp directory for `--no-session` |
 | Working tree snapshots | A private git index and object store in the OS temp directory, using the repository's objects read-only; removed when the session ends. The repository's index, stash and `.git/objects` are never written |
@@ -108,10 +114,12 @@ With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note o
 
 - Prompting is the only way the model learns the habit; there is no training behind it. Expect folds to be late, early or missing caveats until the prompt is tuned against real sessions. [MEASUREMENTS.md](MEASUREMENTS.md) lists what to measure, in order.
 - A snapshot (`git add -A` and `git write-tree` against the private index) runs in the background for every stamped message, and the next tool call waits for it. Unchanged files are not hashed again, but large untracked files are, every time they change.
+- `git add -A` runs the repository's clean filters, so with Git LFS it writes into `.git/lfs/objects` and can be slow on large files. Changes inside submodules show only as the submodule having changed.
 - Snapshots only live as long as the session. After a restart, a fold that reaches back past it lists the files that `read`, `edit` and `write` touched instead of a diff, and older threads get no staleness notes. Outside a git repository that is always the case.
 - The disk diff is the working tree's, not the agent's. Files you edit in another window while an episode runs are listed in its note as changed. Parallel forks share one working tree the same way.
-- Forks run without pi's compaction or run-level retry, so `fork` refuses to start when the context is over 70% full. A fork is stopped after 30 minutes (`episodes.forkTimeoutMs` in pi's settings); its work so far stays archived, and the transcript is written after every turn so a crash or `/reload` mid-fork keeps it.
-- Requests made by `ask` and `fork` skip other extensions' `context` and `before_provider_request` hooks, so the byte-identical prefix only holds when no other extension rewrites requests.
+- Forks run without pi's compaction or run-level retry, so `fork` refuses to start when the context is over 70% full. A fork is stopped after 30 minutes (`episodes.forkTimeoutMs` in pi's settings). A stopped or aborted fork still returns its record, so `recall` and `ask` reach what it did. The transcript is written after every turn, so a crash mid-fork keeps the file, though nothing in the session points at it yet.
+- A fork runs its tools through pi's `executeTool`, which reaches only callable tools. Tools the parent declares but only the model can call, such as `codemode`, stay declared (so the cache matches) but return an error in the fork, and the child is told which ones up front.
+- Requests made by `ask` and `fork` go through pi's model registry, not the main agent loop. They skip other extensions' `context`, `before_provider_request` and `before_provider_headers` hooks, pi's attribution headers and the `blockImages` setting. Extensions that rewrite requests or must add headers do not apply to them, and the prefix only matches the main thread's when none are in use.
 - Inside a fork, `fold` and `fork` are unavailable. Nested folds inside forks are not implemented yet.
 - `!` command output inside a span cannot be removed by pi's context edits and stays in context.
 - Stamps are part of the saved messages, so they are visible in the transcript and session pickers.

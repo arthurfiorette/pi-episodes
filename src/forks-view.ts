@@ -153,7 +153,7 @@ class ForkOverlay {
     }, REFRESH_MS);
   }
 
-  /** Newest first, so the fork just started is the one selected by default. */
+  /** Oldest first, like the transcript; the newest is selected when the overlay opens. */
   private order(): LiveFork[] {
     return [...this.registry.forks.values()].sort((a, b) => a.startedAt - b.startedAt);
   }

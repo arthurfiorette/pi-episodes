@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { convertToLlm, type SessionManager } from '@earendil-works/pi-coding-agent';
-import { headline, planFold, renderNote, USER_TEXT_CAP } from '../src/fold.js';
+import { FOLD_APPLIED_TYPE } from '../src/archive.js';
+import { headline, openItems, planFold, renderNote, USER_TEXT_CAP } from '../src/fold.js';
 import { readStamp } from '../src/stamps.js';
 import { assistant, call, result, session, user } from './helpers.js';
 
@@ -95,23 +96,41 @@ test('a stamp on one result of a parallel batch folds the whole batch', () => {
   assertPaired(manager.buildSessionProjection().messages);
 });
 
-test('refuses to reach behind an earlier fold note', () => {
+function earlierFold(applied: boolean) {
+  const note = {
+    ...result('f0', 'fold', 'first note', 3),
+    details: { kind: 'fold', handle: 'ep-0' }
+  };
   const { manager } = session([
     user('go', 1),
     assistant(call('x', 'bash')),
     result('x', 'bash', 'out', 2),
     assistant(call('f0', 'fold')),
-    result('f0', 'fold', 'first note', 3),
+    note
+  ]);
+  if (applied) manager.appendCustomEntry(FOLD_APPLIED_TYPE, { handle: 'ep-0' });
+  for (const message of [
     assistant(call('y', 'bash')),
     result('y', 'bash', 'out', 4),
     assistant(call('f1', 'fold'))
-  ]);
-  const entries = manager.buildSessionProjection().entries;
+  ]) {
+    manager.appendMessage(message);
+  }
+  return manager.buildSessionProjection().entries;
+}
+
+test('refuses to reach behind an earlier fold note', () => {
+  const entries = earlierFold(true);
 
   assert.throws(() => planFold(entries, 'f1', 2), /behind an earlier fold note/);
   // The note's own stamp would fold the note itself.
   assert.throws(() => planFold(entries, 'f1', 3), /behind an earlier fold note/);
   assert.equal(planFold(entries, 'f1', 4).anchorStamp, 3);
+});
+
+test('a fold whose edits never landed is not a boundary', () => {
+  // Pi drops every boundary draft when one is invalid, so a note can exist without its edits.
+  assert.equal(planFold(earlierFold(false), 'f1', 2).anchorStamp, 1);
 });
 
 test('rejects stamps that are missing, after the call, or leave nothing to fold', () => {
@@ -187,6 +206,7 @@ test('renders the note with disk changes, kept turns and the handle', () => {
   const text = renderNote({
     handle: 'ep-12345678',
     since: 't2',
+    until: 't9',
     messages: 4,
     tokens: 41_000,
     note: '## Changed\nregenerated src/client',
@@ -196,9 +216,26 @@ test('renders the note with disk changes, kept turns and the handle', () => {
     cwd: '/repo'
   });
 
-  assert.match(text, /^\[fold ep-12345678: 4 messages from t2 on, ~41k tokens, archived\]/);
+  assert.match(text, /^\[fold ep-12345678: 4 messages, t2-t9, ~41k tokens, archived\]/);
   assert.match(text, /Changed on disk \(working tree diff\):\nM src\/client\/api\.ts/);
   assert.match(text, /stay above with their stamps: t4\./);
   assert.match(text, /ask\("ep-12345678"/);
   assert.equal(headline('## Changed\nregenerated'), 'Changed');
+});
+
+test('reads the Open section of a note, in the forms the template produces', () => {
+  const note = [
+    'Build fails with TS2322: fixed by regenerating the client.',
+    '- Changed: regenerated src/client.',
+    '- Open: whether CI runs generate before build;',
+    '  remove the debug flag in vite.config.ts.',
+    '- Learned: nothing new.'
+  ].join('\n');
+  assert.equal(
+    openItems(note),
+    'whether CI runs generate before build; remove the debug flag in vite.config.ts.'
+  );
+  assert.equal(openItems('**Open:** check the migration'), 'check the migration');
+  assert.equal(openItems('- Open: none.'), undefined);
+  assert.equal(openItems('Changed: everything'), undefined);
 });

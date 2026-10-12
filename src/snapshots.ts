@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { copyFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, sep } from 'node:path';
+import { isAbsolute, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -140,8 +140,10 @@ export class Snapshots {
         ['rev-parse', '--show-toplevel', '--git-path', 'index', '--git-path', 'objects'],
         { cwd: this.cwd, timeout: TIMEOUT_MS }
       );
-      const [root, index, objects] = stdout.trim().split('\n');
-      if (!root || !index || !objects) return undefined;
+      const [gitRoot, index, objects] = stdout.trim().split('\n');
+      if (!gitRoot || !index || !objects) return undefined;
+      // Git prints forward slashes on Windows; paths from tools use the native separator.
+      const root = resolve(gitRoot);
 
       const absolute = (path: string) => (isAbsolute(path) ? path : join(this.cwd, path));
       const indexFile = join(this.dir, 'index');

@@ -8,7 +8,15 @@ import type {
   ProjectedSessionEntry
 } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { FOLD_TOOL, type FoldDetails, ThreadIndex } from './archive.js';
+import {
+  appliedFolds,
+  FOLD_APPLIED_TYPE,
+  FOLD_REQUEST_TYPE,
+  FOLD_TOOL,
+  type FoldDetails,
+  isFoldDetails,
+  ThreadIndex
+} from './archive.js';
 import { estimateTokens, touchedPaths } from './messages.js';
 import type { DiskChange } from './snapshots.js';
 import { parseStamp, readStamp, stampLabel } from './stamps.js';
@@ -47,14 +55,12 @@ function callsTool(entry: ProjectedSessionEntry, toolCallId: string): boolean {
   );
 }
 
-function isFoldNote(entry: ProjectedSessionEntry): boolean {
+function isFoldNote(entry: ProjectedSessionEntry, applied: ReadonlySet<string>): boolean {
   const message = entryMessage(entry);
-  return (
-    entry.messages.length > 0 &&
-    message?.role === 'toolResult' &&
-    message.toolName === FOLD_TOOL &&
-    !message.isError
-  );
+  if (entry.messages.length === 0 || message?.role !== 'toolResult') return false;
+  if (message.toolName !== FOLD_TOOL || message.isError) return false;
+  // A note whose edits never landed left its span in context; it is not a boundary.
+  return isFoldDetails(message.details) && applied.has(message.details.handle);
 }
 
 function capUserContent(
@@ -134,7 +140,10 @@ export function planFold(
     if (caller >= 0) startIndex = caller;
   }
 
-  const lastNote = entries.findLastIndex((entry, index) => index < foldIndex && isFoldNote(entry));
+  const applied = appliedFolds(entries.map((entry) => entry.sourceEntry));
+  const lastNote = entries.findLastIndex(
+    (entry, index) => index < foldIndex && isFoldNote(entry, applied)
+  );
   if (startIndex <= lastNote) {
     throw new Error(
       'A fold cannot reach behind an earlier fold note. Pick a stamp after the last note.'
@@ -208,6 +217,27 @@ export function planFold(
   };
 }
 
+const SECTION = /^\s*[-*]?\s*\**\s*(changed|learned|decided|rejected|handled|open)\b[^:]*:\**\s*/i;
+const NOTHING_OPEN = /^(none|nothing|n\/a|-)\.?$/i;
+
+/**
+ * The note's Open section, as the template asks for it: from the line that starts with
+ * "Open:" to the next section or blank line. Undefined when there is none or it says none.
+ */
+export function openItems(note: string): string | undefined {
+  const lines = note.split('\n');
+  const start = lines.findIndex((line) => SECTION.exec(line)?.[1]?.toLowerCase() === 'open');
+  if (start < 0) return undefined;
+
+  const items = [lines[start]!.replace(SECTION, '').trim()];
+  for (const line of lines.slice(start + 1)) {
+    if (!line.trim() || SECTION.test(line)) break;
+    items.push(line.trim());
+  }
+  const text = items.filter(Boolean).join(' ').trim();
+  return text && !NOTHING_OPEN.test(text) ? text : undefined;
+}
+
 export function headline(note: string): string {
   const line = note.split('\n').find((text) => text.trim()) ?? '';
   const clean = line.replace(/^[\s#*-]+/, '').trim();
@@ -243,6 +273,7 @@ export function changeLines(
 export function renderNote(options: {
   handle: string;
   since: string;
+  until: string | undefined;
   messages: number;
   tokens: number;
   note: string;
@@ -252,7 +283,7 @@ export function renderNote(options: {
   cwd: string;
 }): string {
   const lines = [
-    `[fold ${options.handle}: ${options.messages} messages from ${options.since} on, ~${formatTokens(options.tokens)} tokens, archived]`,
+    `[fold ${options.handle}: ${options.messages} messages, ${options.until ? `${options.since}-${options.until}` : `from ${options.since} on`}, ~${formatTokens(options.tokens)} tokens, archived]`,
     '',
     options.note.trim(),
     '',
@@ -280,7 +311,7 @@ const FoldParams = Type.Object({
   }),
   note: Type.String({
     description:
-      'Replaces the span. Changed (files, config, external state); learned, with caveats; decided and rejected, with why; still open. Quote exact paths, symbols, commands and error strings.'
+      'Replaces the span. First line: the question and how it ended. Then changed, learned (with conditions), decided and rejected (with why), handled user messages by stamp, open (with the next step). Quote exact paths, symbols, commands and error strings.'
   })
 });
 
@@ -289,7 +320,7 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
     name: FOLD_TOOL,
     label: 'Fold',
     description:
-      'Fold a finished episode: remove the span starting at `since` from your context, archive it, and keep `note` in its place. User messages from the span stay. Call it alone, once the next step no longer depends on the span beyond the note.',
+      'Fold a finished episode: remove the span starting at `since` from your context, archive it, and keep `note` in its place. User messages from the span stay. Call it as the only tool in the response, once the next step no longer depends on the span beyond the note, and not right before your final reply.',
     promptSnippet: 'Fold a finished episode into a note; the span is archived and stays reachable',
     parameters: FoldParams,
     executionMode: 'sequential',
@@ -308,6 +339,9 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
 
       const plan = planFold(ctx.sessionManager.buildSessionProjection().entries, toolCallId, since);
       const sinceLabel = stampLabel(since);
+      const lastStamp = plan.spanMessages.map(readStamp).findLast((stamp) => stamp !== undefined);
+      const untilLabel =
+        lastStamp !== undefined && lastStamp !== since ? stampLabel(lastStamp) : undefined;
       const touched = touchedPaths(plan.spanMessages, state.cwd);
       const files = new Set(touched);
 
@@ -316,10 +350,12 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
       const snapshots = state.snapshots;
       if (snapshots) {
         treeAfter = await snapshots.snapshot();
-        // The tree recorded before the span's first request is the state the span started from.
+        // The span starts from the tree at its last stamp before the first response, such as
+        // the user's prompt; the anchor before the span can be from an earlier run, and files
+        // the user edited between runs are not the episode's changes.
         let from: string | undefined;
-        for (const stamp of [plan.anchorStamp, ...plan.laterStamps]) {
-          if (stamp !== undefined) from ??= await snapshots.treeAt(stamp);
+        for (const stamp of [...plan.laterStamps].reverse().concat(plan.anchorStamp ?? [])) {
+          from ??= await snapshots.treeAt(stamp);
         }
         if (from && treeAfter) {
           changes = await snapshots.diff(from, treeAfter);
@@ -339,6 +375,7 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
         kind: 'fold',
         handle: plan.handle,
         since: sinceLabel,
+        ...(untilLabel ? { until: untilLabel } : {}),
         firstEntryId: plan.firstEntryId,
         lastEntryId: plan.lastEntryId,
         messages: plan.omitted.length,
@@ -348,6 +385,8 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
         files: [...files]
       };
       if (treeAfter) details.treeAfter = treeAfter;
+      const open = openItems(note);
+      if (open) details.open = open;
 
       // A /fold request ends the run here; an autonomous fold continues the task.
       const terminate = state.manualFold;
@@ -360,6 +399,7 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
             text: renderNote({
               handle: plan.handle,
               since: sinceLabel,
+              until: untilLabel,
               messages: plan.omitted.length,
               tokens,
               note,
@@ -394,7 +434,15 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
         'info'
       );
     }
-    return { entries: [...event.entries, ...applied.flatMap((fold) => fold.edits)] };
+    return {
+      entries: [
+        ...event.entries,
+        ...applied.flatMap((fold) => [
+          ...fold.edits,
+          { type: 'custom' as const, customType: FOLD_APPLIED_TYPE, data: { handle: fold.handle } }
+        ])
+      ]
+    };
   });
 
   // The status counts records on the branch, so it refreshes once the edits are committed.
@@ -422,7 +470,7 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
         since === undefined ? 'Pick the span that is done' : `Use since "${stampLabel(since)}"`;
       pi.sendMessage(
         {
-          customType: 'episodes-fold-request',
+          customType: FOLD_REQUEST_TYPE,
           display: true,
           content: `The user asked you to fold now. ${target}, write the note, and call only fold in this response.`
         },

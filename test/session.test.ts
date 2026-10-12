@@ -110,7 +110,7 @@ test('fold, recall, ask and fork in a live session', async () => {
       const roles = conversation(context).map((message) => message.role);
       assert.deepEqual(roles, ['user', 'assistant', 'toolResult']);
       const note = text(conversation(context)[2]!);
-      assert.match(note, /^\[fold ep-[0-9a-f]{8}: 4 messages from t1 on/);
+      assert.match(note, /^\[fold ep-[0-9a-f]{8}: 4 messages, t1-t3,/);
       assert.match(note, /Build passes after regenerating the client\./);
       assert.doesNotMatch(note, /TS2322/);
       handle = /ep-[0-9a-f]{8}/.exec(note)![0];
@@ -349,6 +349,82 @@ test('parallel forks see each other as running, and each transcript is archived 
       archive.messages.filter((message: Message) => message.role === 'assistant').length,
       2
     );
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('reminds once of open items after a fold, on the next user prompt', async () => {
+  const reminder = /Open items from work folded since the last reminder/;
+  const harness = await createSession([
+    () => fauxAssistantMessage(fauxToolCall('bash', { command: 'echo build passed' })),
+    () =>
+      fauxAssistantMessage(
+        fauxToolCall('fold', {
+          since: 't2',
+          note: 'Build passes after regenerating the client.\n- Open: remove the debug flag in vite.config.ts.'
+        })
+      ),
+    (context) => {
+      assert.ok(!conversation(context).some((message) => reminder.test(text(message))));
+      return fauxAssistantMessage('Done.');
+    },
+    (context) => {
+      const messages = conversation(context);
+      const reminded = messages.filter((message) => reminder.test(text(message)));
+      assert.equal(reminded.length, 1);
+      assert.match(
+        text(reminded[0]!),
+        /ep-[0-9a-f]{8} \(Build passes[^)]*\): remove the debug flag/
+      );
+      return fauxAssistantMessage('Removing it.');
+    },
+    (context) => {
+      // Not sent again while nothing new was folded.
+      const reminded = conversation(context).filter((message) => reminder.test(text(message)));
+      assert.equal(reminded.length, 1);
+      return fauxAssistantMessage('ok');
+    }
+  ]);
+
+  try {
+    await harness.session.prompt('make it build');
+    await harness.session.prompt('next task');
+    await harness.session.prompt('and another');
+    if (harness.failures[0]) throw harness.failures[0];
+    assert.equal(harness.pending(), 0);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('ask on a span folded by /fold does not end with the request to fold', async () => {
+  let handle = '';
+  const harness = await createSession([
+    () => fauxAssistantMessage(fauxToolCall('bash', { command: 'echo build passed' })),
+    () => fauxAssistantMessage('It builds.'),
+    () => fauxAssistantMessage(fauxToolCall('fold', { since: 't1', note: 'It builds.' })),
+    (context) => {
+      const note = conversation(context).find((message) => /^\[fold ep-/.test(text(message)));
+      handle = /ep-[0-9a-f]{8}/.exec(text(note!))![0];
+      return fauxAssistantMessage(fauxToolCall('ask', { handle, question: 'Did it build?' }));
+    },
+    (context) => {
+      const messages = conversation(context);
+      assert.match(text(messages.at(-1)!), /Did it build\?/);
+      assert.ok(!messages.some((message) => /asked you to fold now/.test(text(message))));
+      return fauxAssistantMessage('Yes.');
+    },
+    () => fauxAssistantMessage('It did.')
+  ]);
+
+  try {
+    await harness.session.prompt('make it build');
+    await harness.session.prompt('/fold t1');
+    await harness.session.waitForIdle();
+    await harness.session.prompt('did it build?');
+    if (harness.failures[0]) throw harness.failures[0];
+    assert.equal(harness.pending(), 0);
   } finally {
     await harness.cleanup();
   }

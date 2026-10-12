@@ -9,7 +9,8 @@ import { ForkRegistry, registerForksView } from './forks-view.js';
 import { FILE_TOOLS } from './messages.js';
 import { EPISODES_SECTION } from './prompt.js';
 import { registerRecall } from './recall.js';
-import { readStamp, withStamp } from './stamps.js';
+import { registerReminder } from './reminder.js';
+import { unstampedText, withStamp } from './stamps.js';
 import { EpisodeState } from './state.js';
 import { refreshStatus } from './ui.js';
 
@@ -38,10 +39,20 @@ export default function episodes(pi: ExtensionAPI): void {
   });
 
   // Text copied back from an earlier message (for example by /tree) carries its old stamp
-  // inline; the new message gets its own.
-  pi.on('input', (event) => {
+  // inline; the new message gets its own. Only an exact copy is touched, so a user who types
+  // a stamp at the end of a question keeps it.
+  pi.on('input', (event, ctx) => {
     const text = event.text.replace(STALE_STAMP, '');
     if (text === event.text) return { action: 'continue' };
+    const copied = ctx.sessionManager
+      .getEntries()
+      .some(
+        (entry) =>
+          entry.type === 'message' &&
+          entry.message.role === 'user' &&
+          unstampedText(entry.message.content) === text
+      );
+    if (!copied) return { action: 'continue' };
     return event.images
       ? { action: 'transform', text, images: event.images }
       : { action: 'transform', text };
@@ -52,7 +63,6 @@ export default function episodes(pi: ExtensionAPI): void {
   pi.on('message_end', (event) => {
     const message = event.message;
     if (message.role !== 'user' && message.role !== 'toolResult') return undefined;
-    if (readStamp(message) !== undefined) return undefined;
 
     const stamp = state.nextStamp++;
     // Results of a tool batch are saved after every call in it finished, so the tree is final
@@ -61,11 +71,13 @@ export default function episodes(pi: ExtensionAPI): void {
     return { message: { ...message, content: withStamp(message.content, stamp) } };
   });
 
+  // The anchor comes from the model's view, not the raw branch: after a compaction the
+  // newest stamped user message may only exist in the summary.
   pi.on('before_provider_request', (event, ctx) => {
-    const messages = ctx.sessionManager
-      .getBranch()
-      .flatMap((entry) => (entry.type === 'message' ? [entry.message] : []));
-    return anchorBreakpoint(event.payload, cacheAnchor(messages));
+    return anchorBreakpoint(
+      event.payload,
+      cacheAnchor(ctx.sessionManager.buildSessionProjection().messages)
+    );
   });
 
   // A snapshot still being written must not see the changes of the next tool call.
@@ -109,4 +121,5 @@ export default function episodes(pi: ExtensionAPI): void {
   registerAsk(pi, state);
   registerFork(pi, state, forks);
   registerForksView(pi, forks);
+  registerReminder(pi);
 }

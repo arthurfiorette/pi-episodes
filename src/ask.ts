@@ -74,7 +74,7 @@ export function registerAsk(pi: ExtensionAPI, state: EpisodeState): void {
 
       return {
         content: [
-          { type: 'text', text: [`[${thread.handle} answers]`, answer, ...notes].join('\n') }
+          { type: 'text', text: [...notes, `[${thread.handle} answers]`, answer].join('\n') }
         ],
         details: { handle: thread.handle, question: params.question },
         usage: response.usage

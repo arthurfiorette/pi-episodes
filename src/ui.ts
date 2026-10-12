@@ -94,8 +94,9 @@ export const foldRenderers = {
       return new Text(theme.fg('error', resultText(result.content)), 0, 0);
     }
 
+    const range = details.until ? `${details.since}-${details.until}` : `${details.since} on`;
     const summary =
-      `${theme.fg('success', '▸')} ${theme.fg('accent', details.handle)} ` +
+      `${theme.fg('success', '▸')} ${theme.fg('accent', details.handle)} ${theme.fg('accent', range)} ` +
       theme.fg(
         'muted',
         `${details.messages} messages, ~${formatTokens(details.tokens)} tokens archived`
@@ -190,8 +191,11 @@ export const forkRenderers = {
     }
 
     const icon = result.isError ? theme.fg('error', '✗') : theme.fg('success', '✓');
-    const spend = details.usage
-      ? `, ~${formatTokens(details.usage.totalTokens)} tokens${details.usage.cost.total > 0 ? ` $${details.usage.cost.total.toFixed(3)}` : ''}`
+    // Total tokens would count the inherited prefix on every turn and read as millions; the
+    // split shows what the fork actually paid for.
+    const usage = details.usage;
+    const spend = usage
+      ? `, in ${formatTokens(usage.input)}, cache r ${formatTokens(usage.cacheRead)} w ${formatTokens(usage.cacheWrite)}, out ${formatTokens(usage.output)}${usage.cost.total > 0 ? `, $${usage.cost.total.toFixed(3)}` : ''}`
       : '';
     const summary = `${icon} ${theme.fg('accent', details.handle)} ${theme.fg('muted', `${details.turns} turns${spend}`)}`;
     const note = text.split('\n').slice(1).join('\n').trim();
@@ -215,9 +219,9 @@ export function refreshStatus(ctx: ExtensionContext, state: EpisodeState): void 
   const archived = folds.reduce((sum, fold) => sum + fold.tokens, 0);
 
   const parts: string[] = [];
-  if (folds.length > 0) parts.push(`${folds.length} folded, ~${formatTokens(archived)} tokens out`);
+  if (folds.length > 0)
+    parts.push(`${folds.length} folded, ~${formatTokens(archived)} tokens archived`);
   if (forks.length > 0) parts.push(`${forks.length} fork(s)`);
   if (state.runningForks > 0) parts.push(`forking (${state.runningForks})`);
   ctx.ui.setStatus('episodes', parts.length > 0 ? `episodes: ${parts.join(', ')}` : undefined);
-  ctx.ui.setWorkingMessage(state.runningForks > 0 ? 'Forked, waiting for the child' : undefined);
 }

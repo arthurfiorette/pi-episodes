@@ -43,12 +43,30 @@ export function parseStamp(value: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+/**
+ * Appends the stamp, or replaces one that is already there: content copied from an older
+ * message (another extension, an RPC client) would otherwise carry its stamp, and two
+ * messages sharing a stamp would make `since` ambiguous.
+ */
 export function withStamp(
   content: string | (TextContent | ImageContent)[],
   stamp: number
 ): (TextContent | ImageContent)[] {
   const blocks: (TextContent | ImageContent)[] =
     typeof content === 'string' ? [{ type: 'text', text: content }] : [...content];
+  const last = blocks.at(-1);
+  if (last && isStampBlock(last)) blocks.pop();
   blocks.push(stampBlock(stamp));
   return blocks;
+}
+
+/** The text of a message's content without its stamp block, joined as pi joins it. */
+export function unstampedText(content: string | readonly (TextContent | ImageContent)[]): string {
+  if (typeof content === 'string') return content;
+  const last = content.at(-1);
+  const blocks = last && isStampBlock(last) ? content.slice(0, -1) : content;
+  return blocks
+    .filter((block): block is TextContent => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
 }

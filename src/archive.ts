@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Usage } from '@earendil-works/pi-ai';
@@ -13,6 +13,25 @@ export type SessionView = ExtensionContext['sessionManager'];
 
 export const FOLD_TOOL = 'fold';
 export const FORK_TOOL = 'fork';
+/** The message /fold sends to ask for a fold. */
+export const FOLD_REQUEST_TYPE = 'episodes-fold-request';
+/**
+ * Appended with a fold's context edits, in the same all-or-nothing batch. A fold result
+ * without it never took effect: pi drops every boundary draft when any is invalid, and a crash
+ * can land between the result and the turn end.
+ */
+export const FOLD_APPLIED_TYPE = 'episodes-fold-applied';
+
+/** Handles of folds whose edits are among these entries. */
+export function appliedFolds(entries: readonly SessionEntry[]): Set<string> {
+  const handles = new Set<string>();
+  for (const entry of entries) {
+    if (entry.type !== 'custom' || entry.customType !== FOLD_APPLIED_TYPE) continue;
+    const handle = (entry.data as { handle?: unknown } | undefined)?.handle;
+    if (typeof handle === 'string') handles.add(handle);
+  }
+  return handles;
+}
 
 /** Stored on the fold tool result, so the record follows the branch it belongs to. */
 export interface FoldDetails {
@@ -21,9 +40,13 @@ export interface FoldDetails {
   since: string;
   firstEntryId: string;
   lastEntryId: string;
+  /** Last stamp inside the span, so the range it covered can be shown. */
+  until?: string;
   messages: number;
   tokens: number;
   headline: string;
+  /** The note's open items, for the reminder after the fold. */
+  open?: string;
   keptUserTurns: string[];
   /** Absolute paths touched or changed inside the span. */
   files: string[];
@@ -39,6 +62,8 @@ export interface ForkDetails {
   parentEntryId: string;
   turns: number;
   headline: string;
+  /** The final note's open items, for the reminder after the fork. */
+  open?: string;
   /** Absolute paths touched or changed while the fork ran. */
   files: string[];
   /** Working tree when the fork finished. */
@@ -55,6 +80,8 @@ export interface ForkArchive {
   handle: string;
   task: string;
   parentEntryId: string;
+  /** Results that closed sibling fork calls in the child's prefix, so `ask` rebuilds it as it was. */
+  siblings?: AgentMessage[];
   /** Messages the child added after the parent prefix, starting with the task. */
   messages: AgentMessage[];
 }
@@ -91,7 +118,11 @@ function toolDetails(entry: SessionEntry, toolName: string): unknown {
 }
 
 export function foldRecords(entries: readonly SessionEntry[]): FoldDetails[] {
-  return entries.map((entry) => toolDetails(entry, FOLD_TOOL)).filter(isFoldDetails);
+  const applied = appliedFolds(entries);
+  return entries
+    .map((entry) => toolDetails(entry, FOLD_TOOL))
+    .filter(isFoldDetails)
+    .filter((record) => applied.has(record.handle));
 }
 
 export function forkRecords(entries: readonly SessionEntry[]): ForkDetails[] {
@@ -100,9 +131,11 @@ export function forkRecords(entries: readonly SessionEntry[]): ForkDetails[] {
 
 /** Folds and forks on these entries, in order. */
 export function threadRecords(entries: readonly SessionEntry[]): ThreadRecord[] {
-  return entries.flatMap((entry) => {
+  const applied = appliedFolds(entries);
+  return entries.flatMap((entry): ThreadRecord[] => {
     const record = toolDetails(entry, FOLD_TOOL) ?? toolDetails(entry, FORK_TOOL);
-    return isFoldDetails(record) || isForkDetails(record) ? [record] : [];
+    if (isFoldDetails(record)) return applied.has(record.handle) ? [record] : [];
+    return isForkDetails(record) ? [record] : [];
   });
 }
 
@@ -120,7 +153,10 @@ export async function writeForkArchive(
   if (!dir) return undefined;
   await mkdir(dir, { recursive: true });
   const file = join(dir, `${archive.handle}.json`);
-  await writeFile(file, JSON.stringify(archive));
+  // Written after every turn; a crash mid-write must not leave a truncated transcript.
+  const temporary = `${file}.${process.pid}.tmp`;
+  await writeFile(temporary, JSON.stringify(archive));
+  await rename(temporary, file);
   return file;
 }
 
@@ -161,9 +197,18 @@ export class ThreadIndex {
     return {
       handle: fold.handle,
       kind: 'fold',
-      label: `turns from ${fold.since} on`,
+      label: fold.until ? `turns ${fold.since}-${fold.until}` : `turns from ${fold.since} on`,
       messages: path.slice(start).flatMap(sessionEntryToContextMessages),
-      context: () => buildSessionProjection(this.sessions.getEntries(), fold.lastEntryId).messages,
+      context: () => {
+        const messages = buildSessionProjection(
+          this.sessions.getEntries(),
+          fold.lastEntryId
+        ).messages;
+        // A span folded through /fold ends with the request to fold; a question appended
+        // after it would read as that request, and the thread would try to fold again.
+        while (isFoldRequest(messages.at(-1))) messages.pop();
+        return messages;
+      },
       record: fold
     };
   }
@@ -179,11 +224,16 @@ export class ThreadIndex {
       messages: archive.messages,
       context: () => [
         ...buildSessionProjection(this.sessions.getEntries(), fork.parentEntryId).messages,
+        ...(archive.siblings ?? []),
         ...archive.messages
       ],
       record: fork
     };
   }
+}
+
+function isFoldRequest(message: AgentMessage | undefined): boolean {
+  return message?.role === 'custom' && message.customType === FOLD_REQUEST_TYPE;
 }
 
 async function readArchive(file: string | undefined): Promise<ForkArchive | undefined> {

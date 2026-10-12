@@ -200,7 +200,8 @@ export function registerRecall(pi: ExtensionAPI, state: EpisodeState): void {
       const hitThreads = threads.filter((thread) =>
         matches.some((found) => found.handle === thread.handle)
       );
-      const lines = matches.map(formatMatch);
+      // Staleness goes first: a cue only works if it is seen before the matches are acted on.
+      const lines = [...(await staleness(state, hitThreads)), ...matches.map(formatMatch)];
       if (total > matches.length) {
         const file = await spill(archiveDir(ctx.sessionManager), params.query, all);
         lines.push(
@@ -208,7 +209,6 @@ export function registerRecall(pi: ExtensionAPI, state: EpisodeState): void {
         );
         details.file = file;
       }
-      lines.push(...(await staleness(state, hitThreads)));
 
       return { content: [{ type: 'text', text: lines.join('\n') }], details };
     }
