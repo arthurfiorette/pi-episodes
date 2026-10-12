@@ -4,10 +4,12 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Usage } from '@earendil-works/pi-ai';
 import {
   buildSessionProjection,
+  type CompactionEntry,
   type ExtensionContext,
   type SessionEntry,
   sessionEntryToContextMessages
 } from '@earendil-works/pi-coding-agent';
+import { readStamp, stampLabel } from './stamps.js';
 
 export type SessionView = ExtensionContext['sessionManager'];
 
@@ -74,7 +76,45 @@ export interface ForkDetails {
   usage?: Usage;
 }
 
-export type ThreadRecord = FoldDetails | ForkDetails;
+/**
+ * The turns a pi compaction summarized away, as one more archived thread. Derived from the
+ * compaction entry itself; nothing is stored for it.
+ */
+export interface CompactionRecord {
+  kind: 'compaction';
+  handle: string;
+  entryId: string;
+  headline: string;
+  tokens: number;
+  /** Files pi's default compaction recorded as modified, as recorded (possibly relative). */
+  files: string[];
+  /** Never set; present so every record can be read the same way. */
+  open?: string;
+  /** Never set; there is no snapshot from compaction time. */
+  treeAfter?: string;
+}
+
+export type ThreadRecord = FoldDetails | ForkDetails | CompactionRecord;
+
+export function compactionHandle(entryId: string): string {
+  return `cp-${entryId.slice(0, 8)}`;
+}
+
+function compactionRecord(entry: CompactionEntry): CompactionRecord {
+  // Only modified files: compactions list every file read, which would make the file-touch
+  // cue fire on nearly everything.
+  const modified = (entry.details as { modifiedFiles?: unknown } | undefined)?.modifiedFiles;
+  return {
+    kind: 'compaction',
+    handle: compactionHandle(entry.id),
+    entryId: entry.id,
+    headline: `turns compacted at ${entry.timestamp.slice(0, 16).replace('T', ' ')}`,
+    tokens: entry.tokensBefore,
+    files: Array.isArray(modified)
+      ? modified.filter((path): path is string => typeof path === 'string')
+      : []
+  };
+}
 
 export interface ForkArchive {
   handle: string;
@@ -88,12 +128,15 @@ export interface ForkArchive {
 
 export interface Thread {
   handle: string;
-  kind: 'fold' | 'fork';
+  kind: ThreadRecord['kind'];
   label: string;
   /** What the thread itself held, unedited. */
   messages: AgentMessage[];
-  /** The full context the thread ran with: everything before it plus the thread. */
-  context(): AgentMessage[];
+  /**
+   * The full context the thread ran with: everything before it plus the thread. Absent for
+   * compacted turns, which filled the window when they were compacted; `ask` cannot resume them.
+   */
+  context?: () => AgentMessage[];
   record: ThreadRecord;
 }
 
@@ -129,10 +172,11 @@ export function forkRecords(entries: readonly SessionEntry[]): ForkDetails[] {
   return entries.map((entry) => toolDetails(entry, FORK_TOOL)).filter(isForkDetails);
 }
 
-/** Folds and forks on these entries, in order. */
+/** Folds, forks and compactions on these entries, in order. */
 export function threadRecords(entries: readonly SessionEntry[]): ThreadRecord[] {
   const applied = appliedFolds(entries);
   return entries.flatMap((entry): ThreadRecord[] => {
+    if (entry.type === 'compaction') return [compactionRecord(entry)];
     const record = toolDetails(entry, FOLD_TOOL) ?? toolDetails(entry, FORK_TOOL);
     if (isFoldDetails(record)) return applied.has(record.handle) ? [record] : [];
     return isForkDetails(record) ? [record] : [];
@@ -174,7 +218,11 @@ export class ThreadIndex {
     const threads: Thread[] = [];
     for (const record of threadRecords(this.sessions.getBranch())) {
       const thread =
-        record.kind === 'fold' ? this.foldThread(record) : await this.forkThread(record);
+        record.kind === 'fold'
+          ? this.foldThread(record)
+          : record.kind === 'fork'
+            ? await this.forkThread(record)
+            : this.compactionThread(record);
       if (thread) threads.push(thread);
     }
     return threads;
@@ -186,7 +234,47 @@ export class ThreadIndex {
     const fold = foldRecords(entries).find((record) => record.handle === handle);
     if (fold) return this.foldThread(fold);
     const fork = forkRecords(entries).find((record) => record.handle === handle);
-    return fork ? this.forkThread(fork) : undefined;
+    if (fork) return this.forkThread(fork);
+    const compaction = entries.find(
+      (entry): entry is CompactionEntry =>
+        entry.type === 'compaction' && compactionHandle(entry.id) === handle
+    );
+    return compaction ? this.compactionThread(compactionRecord(compaction)) : undefined;
+  }
+
+  /**
+   * What the compaction summarized: the view just before it (folds applied, so folded spans
+   * stay in their own threads), from after the previous summary up to the first kept entry.
+   */
+  private compactionThread(record: CompactionRecord): Thread | undefined {
+    const entries = this.sessions.getEntries();
+    const entry = entries.find((candidate) => candidate.id === record.entryId);
+    if (entry?.type !== 'compaction' || !entry.parentId) return undefined;
+
+    const before = buildSessionProjection(entries, entry.parentId).entries;
+    const start = before[0]?.sourceEntry.type === 'compaction' ? 1 : 0;
+    const kept = before.findIndex(
+      (candidate) => candidate.sourceEntry.id === entry.firstKeptEntryId
+    );
+    const messages = before
+      .slice(start, kept < 0 ? before.length : kept)
+      .flatMap((candidate) => candidate.messages)
+      .filter((message) => message.role !== 'system');
+    if (messages.length === 0) return undefined;
+
+    const stamps = messages.map(readStamp).filter((stamp) => stamp !== undefined);
+    const first = stamps[0];
+    const last = stamps.at(-1);
+    return {
+      handle: record.handle,
+      kind: 'compaction',
+      label:
+        first !== undefined && last !== undefined
+          ? `turns ${stampLabel(first)}-${stampLabel(last)}, compacted`
+          : 'compacted turns',
+      messages,
+      record
+    };
   }
 
   private foldThread(fold: FoldDetails): Thread | undefined {

@@ -9,12 +9,15 @@ export interface EpisodesSettings {
   openReminder: boolean;
   /** Upper bound on the reminder's size. */
   openReminderMaxTokens: number;
+  /** After a compaction, tell the agent the compacted turns are archived and recallable. */
+  compactionNotice: boolean;
 }
 
 const DEFAULTS: EpisodesSettings = {
   forkTimeoutMs: 30 * 60 * 1000,
   openReminder: true,
-  openReminderMaxTokens: 300
+  openReminderMaxTokens: 300,
+  compactionNotice: true
 };
 
 function positive(value: unknown, fallback: number): number {
@@ -26,6 +29,8 @@ export function episodesSettings(settings: object): EpisodesSettings {
   return {
     forkTimeoutMs: positive(raw.forkTimeoutMs, DEFAULTS.forkTimeoutMs),
     openReminder: typeof raw.openReminder === 'boolean' ? raw.openReminder : DEFAULTS.openReminder,
-    openReminderMaxTokens: positive(raw.openReminderMaxTokens, DEFAULTS.openReminderMaxTokens)
+    openReminderMaxTokens: positive(raw.openReminderMaxTokens, DEFAULTS.openReminderMaxTokens),
+    compactionNotice:
+      typeof raw.compactionNotice === 'boolean' ? raw.compactionNotice : DEFAULTS.compactionNotice
   };
 }

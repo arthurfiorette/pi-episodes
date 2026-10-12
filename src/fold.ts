@@ -103,7 +103,9 @@ function capUserContent(
 export function planFold(
   entries: readonly ProjectedSessionEntry[],
   foldCallId: string,
-  since: number
+  since: number,
+  /** The newest stamp written in the session, to tell a made-up stamp from one that is gone. */
+  latestStamp?: number
 ): FoldPlan {
   const foldIndex = entries.findIndex((entry) => callsTool(entry, foldCallId));
   if (foldIndex < 0) {
@@ -119,12 +121,37 @@ export function planFold(
     throw new Error('Only one fold per response; this one was ignored.');
   }
 
+  // Nothing before the latest applied note or the compaction summary can be folded: the
+  // note already stands for its span, and the summary for everything it replaced.
+  const applied = appliedFolds(entries.map((entry) => entry.sourceEntry));
+  const lastNote = entries.findLastIndex(
+    (entry, index) => index < foldIndex && isFoldNote(entry, applied)
+  );
+  const compaction = entries.findLastIndex(
+    (entry, index) => index < foldIndex && entry.sourceEntry.type === 'compaction'
+  );
+  const boundary = Math.max(lastNote, compaction);
+  const earliest = entries
+    .slice(boundary + 1, foldIndex)
+    .flatMap((entry) => entry.messages.map(readStamp))
+    .find((stamp) => stamp !== undefined);
+  const pick =
+    earliest === undefined
+      ? 'Nothing before this call can be folded yet.'
+      : `The earliest stamp you can fold from is ${stampLabel(earliest)}.`;
+
+  if (latestStamp !== undefined && since > latestStamp) {
+    throw new Error(
+      `${stampLabel(since)} does not exist; the latest stamp is ${stampLabel(latestStamp)}. ${pick}`
+    );
+  }
   const sinceIndex = entries.findIndex((entry) =>
     entry.messages.some((message) => readStamp(message) === since)
   );
   if (sinceIndex < 0) {
+    // A compaction summary can still mention it, but the turn itself is gone.
     throw new Error(
-      `${stampLabel(since)} is not in the current context. It may already be folded or compacted.`
+      `${stampLabel(since)} is no longer in your context: it was compacted or already folded. ${pick}`
     );
   }
   if (sinceIndex >= foldIndex) {
@@ -140,14 +167,9 @@ export function planFold(
     if (caller >= 0) startIndex = caller;
   }
 
-  const applied = appliedFolds(entries.map((entry) => entry.sourceEntry));
-  const lastNote = entries.findLastIndex(
-    (entry, index) => index < foldIndex && isFoldNote(entry, applied)
-  );
-  if (startIndex <= lastNote) {
-    throw new Error(
-      'A fold cannot reach behind an earlier fold note. Pick a stamp after the last note.'
-    );
+  if (startIndex <= boundary) {
+    const what = boundary === lastNote ? 'an earlier fold note' : 'the compaction summary';
+    throw new Error(`A fold cannot reach behind ${what}. ${pick}`);
   }
 
   const span = entries.slice(startIndex, foldIndex);
@@ -337,7 +359,12 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
         throw new Error('The note is empty. Write what the rest of the task needs from the span.');
       }
 
-      const plan = planFold(ctx.sessionManager.buildSessionProjection().entries, toolCallId, since);
+      const plan = planFold(
+        ctx.sessionManager.buildSessionProjection().entries,
+        toolCallId,
+        since,
+        state.nextStamp - 1
+      );
       const sinceLabel = stampLabel(since);
       const lastStamp = plan.spanMessages.map(readStamp).findLast((stamp) => stamp !== undefined);
       const untilLabel =

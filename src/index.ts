@@ -3,6 +3,8 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { threadRecords } from './archive.js';
 import { registerAsk } from './ask.js';
 import { anchorBreakpoint, cacheAnchor } from './cache.js';
+import { registerCompactionNotice } from './compaction.js';
+import { registerStampDisplay } from './display.js';
 import { registerFold } from './fold.js';
 import { registerFork } from './fork.js';
 import { ForkRegistry, registerForksView } from './forks-view.js';
@@ -98,7 +100,9 @@ export default function episodes(pi: ExtensionAPI): void {
     const records = threadRecords(ctx.sessionManager.getBranch())
       .filter(
         (record) =>
-          record.files.includes(absolute) && !state.surfaced.has(`${record.handle}:${absolute}`)
+          // Compactions record paths as the tools received them, possibly relative.
+          record.files.some((file) => resolve(state.cwd, file) === absolute) &&
+          !state.surfaced.has(`${record.handle}:${absolute}`)
       )
       .slice(-MAX_SURFACED_THREADS);
     if (records.length === 0) return undefined;
@@ -106,8 +110,14 @@ export default function episodes(pi: ExtensionAPI): void {
     const shown = relative(state.cwd, absolute);
     const lines = records.map((record) => {
       state.surfaced.add(`${record.handle}:${absolute}`);
-      const kind = record.kind === 'fold' ? 'folded span' : 'fork';
-      return `[episodes] ${shown} was also touched in ${kind} ${record.handle} (${record.headline}). If what happened there matters now: recall, or ask("${record.handle}", "<question>").`;
+      const kind = { fold: 'folded span', fork: 'fork', compaction: 'compacted turns' }[
+        record.kind
+      ];
+      const back =
+        record.kind === 'compaction'
+          ? `recall("<exact words>", handle "${record.handle}")`
+          : `recall, or ask("${record.handle}", "<question>")`;
+      return `[episodes] ${shown} was also touched in ${kind} ${record.handle} (${record.headline}). If what happened there matters now: ${back}.`;
     });
     const content = [...event.content, { type: 'text' as const, text: lines.join('\n') }];
     // Replacing content alone would drop structured output for programmatic callers.
@@ -122,4 +132,6 @@ export default function episodes(pi: ExtensionAPI): void {
   registerFork(pi, state, forks);
   registerForksView(pi, forks);
   registerReminder(pi);
+  registerStampDisplay(pi);
+  registerCompactionNotice(pi);
 }

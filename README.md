@@ -44,7 +44,7 @@ Compaction summarizes the whole session at once, when the window fills. `pi-epis
 
 ## How it works
 
-Every user message and tool result gets a **turn stamp** such as `[t12]`, appended as its own text block when the message is saved. Stamps are written once and never edited, so they never change bytes that are already in the prompt cache.
+Every user message and tool result gets a **turn stamp** such as `[t12]`, appended as its own text block when the message is saved. Stamps are written once and never edited, so they never change bytes that are already in the prompt cache. They are for the model, which names them in `since`; the transcript hides them.
 
 When an episode is done, the agent calls `fold(since: "t13", note: "...")`, where `t13` is the first stamped message inside the episode. If that is a tool result, the span starts at the response that made the call, so a tool call never loses its result. From there up to the fold call, the span leaves the model's context:
 
@@ -57,7 +57,7 @@ When an episode is done, the agent calls `fold(since: "t13", note: "...")`, wher
 
 The harness extends the note with what changed on disk during the span, the stamps of the user messages that stayed, and a handle such as `ep-1a2b3c4d` that points at the archive. Disk changes come from a working tree diff, so files a shell command generated are listed too; files ignored by git are not.
 
-Nothing is deleted. A fold appends `context_edit` entries to the session, which only change what the model sees from then on; `/tree`, exports and the session file still hold the full span. A fold cannot reach back past the previous note, so notes on one line never contain each other.
+Nothing is deleted. A fold appends `context_edit` entries to the session, which only change what the model sees from then on; `/tree`, exports and the session file still hold the full span. A fold cannot reach back past the previous note or a compaction summary, so notes on one line never contain each other. A summary can still mention old stamps; folding from one is refused with the earliest stamp that can be folded from, so the retry is right the first time.
 
 On screen, the folded messages stay where they were. What marks the fold is its own block (`▸ ep-1a2b3c4d t13-t27  4 messages, ~41k tokens archived`, with the note behind ctrl+o), a notification, and the footer status. The range is the stamps the span covered, so you can see which turns left the model's context. See [Limitations](#limitations) for why the span itself does not collapse.
 
@@ -74,8 +74,8 @@ A fold happens when the main goal of an episode is met, which is when trailing s
 | Tool | What it does | Cost |
 | --- | --- | --- |
 | `fold(since, note)` | Replaces the span starting at `since` with `note` and archives it. | One tool call. With Anthropic, the cache is rewritten from the newest fold note or user message before the span (see [Prompt caching](#prompt-caching)). |
-| `recall(query)` | Searches the archived spans and forks on the current branch: tool outputs, the agent's own messages and reasoning, tool arguments. Results are ranked with BM25+ ([MiniSearch](https://github.com/lucaong/minisearch)): messages holding every word first, in any order, rare words such as error codes weighing more than common ones, with prefixes and small typos tolerated on plain words but never on codes or paths. A `"quoted"` query or `regex: true` matches exact text per line instead. Returns the best line of each match with its handle and turn. With a handle, it searches that thread on any branch. Matches past the limit (30 by default, 200 at most) are written to a file next to the fork transcripts, so a broad query costs a path, not the context. | No model call. |
-| `ask(handle, question)` | Resumes an archived thread with everything it held, asks one question, returns only the answer. | One model call over the thread's context, cached if the provider still has it. |
+| `recall(query)` | Searches the archived spans, forks and compacted turns on the current branch: tool outputs, the agent's own messages and reasoning, tool arguments. Results are ranked with BM25+ ([MiniSearch](https://github.com/lucaong/minisearch)): messages holding every word first, in any order, rare words such as error codes weighing more than common ones, with prefixes and small typos tolerated on plain words but never on codes or paths. A `"quoted"` query or `regex: true` matches exact text per line instead. Returns the best line of each match with its handle and turn. With a handle, it searches that thread on any branch. Matches past the limit (30 by default, 200 at most) are written to a file next to the fork transcripts, so a broad query costs a path, not the context. | No model call. |
+| `ask(handle, question)` | Resumes an archived fold or fork with everything it held, asks one question, returns only the answer. Compacted turns cannot be asked: they filled the window when they were compacted. | One model call over the thread's context, cached if the provider still has it. |
 | `fork(task)` | Runs a copy of the agent, starting from its current context, until the task is done, and returns its final note plus what changed on disk. Tool calls go through the parent's tools, hooks and permissions. | The child's prefix is the parent's, so it reads from the parent's cache while that is alive; each child turn re-reads the whole prefix at the cached price, and parallel forks each write their own tail. |
 
 Two cues help the agent go back when it does not know it should:
@@ -86,6 +86,14 @@ Two cues help the agent go back when it does not know it should:
 `fork` is meant for long work that continues the agent's own, such as making the build pass. It is deliberately not a reviewer: a review is useful because it does not share the author's assumptions. The other half of the post, a separate agent consulted on purpose and handed the user's requests without the agent's reasoning, is not built here; the prompt only tells the model how to brief one if it has such a tool.
 
 While a fork runs, a widget above the editor shows its turn, elapsed time and current tool. `ctrl+shift+e` or `/forks` opens an overlay with the forks started in this pi process, running or finished, and the child's transcript as it grows: tab switches fork, arrows scroll, esc closes. After a restart, `/episodes`, `recall` and `ask` still reach earlier forks; the overlay does not.
+
+<br />
+
+### Compacted turns
+
+Pi's compaction replaces the oldest turns with a summary. With `pi-episodes`, those turns become one more archived thread, `cp-1a2b3c4d`, holding what the summary replaced as the model saw it (spans folded before stay in their own threads). `recall` searches them like folds and forks, so an exact error string the summary left out can still be found; `ask` cannot resume them, since they filled the context window. The file-touch cue covers the files pi's compaction recorded as modified.
+
+The summary is pi's text and cannot name that handle, so right after a compaction the harness adds one short message saying where the compacted turns went. Compaction has just rewritten the whole prompt, so it costs no cache. Turn it off with `{ "episodes": { "compactionNotice": false } }`.
 
 <br />
 
@@ -103,7 +111,7 @@ With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note o
 
 | Data | Location |
 | --- | --- |
-| Stamps, notes, fold and fork records, open-item reminders | The session file: on the messages and tool results themselves, plus a marker entry per applied fold and a custom message per reminder |
+| Stamps, notes, fold and fork records, open-item reminders, compaction notices | The session file: on the messages and tool results themselves, plus a marker entry per applied fold and a custom message per reminder or notice. Compacted-turn threads are derived from pi's compaction entries; nothing extra is stored |
 | Fork transcripts | `<session>.episodes/<handle>.json` next to the session file, or memory for `--no-session` |
 | Recall overflow | `<session>.episodes/recall-<time>-<query>.txt`, or the OS temp directory for `--no-session` |
 | Recall search index | Memory only: built on the first ranked `recall` of a session from the archive, then added to as threads are archived |
@@ -123,7 +131,7 @@ With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note o
 - Requests made by `ask` and `fork` go through pi's model registry, not the main agent loop. They skip other extensions' `context`, `before_provider_request` and `before_provider_headers` hooks, pi's attribution headers and the `blockImages` setting. Extensions that rewrite requests or must add headers do not apply to them, and the prefix only matches the main thread's when none are in use.
 - Inside a fork, `fold` and `fork` are unavailable. Nested folds inside forks are not implemented yet.
 - `!` command output inside a span cannot be removed by pi's context edits and stays in context.
-- Stamps are part of the saved messages, so they are visible in the transcript and session pickers.
+- Stamps are part of the saved messages. The transcript hides them on user messages and on tool results whose tool has a renderer of its own; tools that use pi's default rendering still show them on resumed sessions, and so do session pickers.
 - **Folded messages do not collapse in the transcript**, the way a subagent's work shows as one block. Pi's TUI rebuilds the transcript from the session entries and ignores `context_edit`, which only shapes the model's view. Extensions can render their own tool calls, custom messages and custom entries, but cannot hide, dim or re-render earlier user, assistant or tool messages, and the chat container is not exposed. Collapsing the span needs a change in pi: render a run of omitted entries as one expandable row, rebuild the chat when a `context_edit` entry is appended, and ideally let the edit carry a label such as the fold's handle. Pi's own overflow recovery omits failed attempts with the same mechanism and leaves them on screen too, so the change is useful on its own. Not sent as a PR yet.
 
 <br />

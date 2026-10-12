@@ -17,7 +17,7 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 **Method.** Script over session files with folds, real model.
 
 **Report.**
-- Rejected folds, by error (`since` missing, after the call, behind a note, nothing to fold), and whether the retry that followed was correct.
+- Rejected folds, by error (`since` made up, compacted or already folded, after the call, behind a note or summary, nothing to fold), and whether the retry that followed was correct. The errors name the earliest foldable stamp, so the retry should be right the first time.
 - Folds not alone in their response.
 - Folds called in the response that should have been the final reply (the prompt says not to).
 - Note size in tokens and the note-to-span ratio. A note over a third of its span saved little.
@@ -138,6 +138,7 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 
 **Report.**
 - Hit rate: triggers followed by a recall or ask.
+- After a compaction: recalls that hit compacted-turn threads (`cp-`), and whether those hits held something the summary had dropped.
 - Re-derivation count, per fold.
 - Spurious rate: recalls and asks with no trigger, and how many returned nothing.
 - File-touch cue: followed by a recall or ask on that handle, or ignored. The cue is capped at two threads per file; the ignored rate at caps of one, two and five threads shows whether the cap is right. Separately for spans that only read the file.

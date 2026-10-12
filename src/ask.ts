@@ -49,6 +49,11 @@ export function registerAsk(pi: ExtensionAPI, state: EpisodeState): void {
         params.handle
       );
       if (!thread) throw new Error(`No archived thread ${params.handle}.`);
+      if (!thread.context) {
+        throw new Error(
+          `${params.handle} holds compacted turns, which filled the context window when they were compacted; it is too large to ask. Use recall to search it.`
+        );
+      }
 
       // The thread's own system messages carry its prompt and tools, so the request repeats
       // its prefix byte for byte and can read it from the cache while it is alive.

@@ -122,7 +122,10 @@ function earlierFold(applied: boolean) {
 test('refuses to reach behind an earlier fold note', () => {
   const entries = earlierFold(true);
 
-  assert.throws(() => planFold(entries, 'f1', 2), /behind an earlier fold note/);
+  assert.throws(
+    () => planFold(entries, 'f1', 2),
+    /behind an earlier fold note\. The earliest stamp you can fold from is t4\./
+  );
   // The note's own stamp would fold the note itself.
   assert.throws(() => planFold(entries, 'f1', 3), /behind an earlier fold note/);
   assert.equal(planFold(entries, 'f1', 4).anchorStamp, 3);
@@ -137,7 +140,10 @@ test('rejects stamps that are missing, after the call, or leave nothing to fold'
   const { manager } = session(buildLoop);
   const entries = manager.buildSessionProjection().entries;
 
-  assert.throws(() => planFold(entries, 'f1', 99), /not in the current context/);
+  assert.throws(
+    () => planFold(entries, 'f1', 99, 5),
+    /t99 does not exist; the latest stamp is t5\. The earliest stamp you can fold from is t1\./
+  );
   assert.throws(() => planFold(entries, 'missing', 2), /called fold is not in the current context/);
 
   const { manager: late } = session([
@@ -238,4 +244,32 @@ test('reads the Open section of a note, in the forms the template produces', () 
   assert.equal(openItems('**Open:** check the migration'), 'check the migration');
   assert.equal(openItems('- Open: none.'), undefined);
   assert.equal(openItems('Changed: everything'), undefined);
+});
+
+test('after a compaction, stamps the summary mentions are gone and the kept ones can be folded', () => {
+  const { manager, ids } = session([
+    user('go', 1),
+    assistant(call('x', 'bash')),
+    result('x', 'bash', 'build failed', 2),
+    user('next', 3),
+    assistant(call('y', 'bash')),
+    result('y', 'bash', 'out', 4)
+  ]);
+  manager.appendCompaction('Earlier: at t2 the build failed.', ids[3]!, 1000);
+  for (const message of [
+    assistant(call('z', 'bash')),
+    result('z', 'bash', 'out', 5),
+    assistant(call('f', 'fold'))
+  ]) {
+    manager.appendMessage(message);
+  }
+  const entries = manager.buildSessionProjection().entries;
+
+  assert.throws(
+    () => planFold(entries, 'f', 2, 5),
+    /t2 is no longer in your context: it was compacted or already folded\. The earliest stamp you can fold from is t3\./
+  );
+  const plan = planFold(entries, 'f', 3, 5);
+  assert.equal(plan.anchorStamp, undefined);
+  assert.equal(plan.keptUserTurns.join(), 't3');
 });

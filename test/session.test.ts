@@ -39,7 +39,10 @@ function conversation(context: TranscriptContext): Message[] {
   return context.messages.filter((message) => message.role !== 'system');
 }
 
-async function createSession(steps: Step[], options: { git?: boolean; persist?: boolean } = {}) {
+async function createSession(
+  steps: Step[],
+  options: { git?: boolean; persist?: boolean; keepRecentTokens?: number } = {}
+) {
   const dir = await mkdtemp(join(tmpdir(), 'pi-episodes-session-'));
   if (options.git) execFileSync('git', ['init', '-q'], { cwd: dir });
   const faux = fauxProvider();
@@ -77,7 +80,14 @@ async function createSession(steps: Step[], options: { git?: boolean; persist?: 
     sessionManager: options.persist
       ? SessionManager.create(dir, join(dir, 'sessions'))
       : SessionManager.inMemory(dir),
-    settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } })
+    settingsManager: SettingsManager.inMemory({
+      compaction: {
+        enabled: false,
+        ...(options.keepRecentTokens === undefined
+          ? {}
+          : { keepRecentTokens: options.keepRecentTokens })
+      }
+    })
   });
   await session.bindExtensions({});
 
@@ -425,6 +435,59 @@ test('ask on a span folded by /fold does not end with the request to fold', asyn
     await harness.session.prompt('/fold t1');
     await harness.session.waitForIdle();
     await harness.session.prompt('did it build?');
+    if (harness.failures[0]) throw harness.failures[0];
+    assert.equal(harness.pending(), 0);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('after a compaction, recall finds the compacted turns and fold names what is gone', async () => {
+  let handle = '';
+  const harness = await createSession(
+    [
+      () =>
+        fauxAssistantMessage(fauxToolCall('bash', { command: 'echo "error TS2322 in api.ts"' })),
+      () => fauxAssistantMessage('Fixed by regenerating the client.'),
+      () => fauxAssistantMessage('ok'),
+      // pi's summarizer, once for the history and once for the split turn: whatever it
+      // writes, stamps in it are only text.
+      () =>
+        fauxAssistantMessage('## Goal\nMake it build. At t2 the build failed with a type error.'),
+      () => fauxAssistantMessage('The user said next.'),
+      (context) => {
+        const notice = conversation(context).find((message) =>
+          /archived as cp-[0-9a-f]{8}/.test(text(message))
+        );
+        assert.ok(notice);
+        return fauxAssistantMessage(fauxToolCall('recall', { query: 'TS2322' }));
+      },
+      (context) => {
+        const result = text(conversation(context).at(-1)!);
+        assert.match(result, /cp-[0-9a-f]{8} t\d+ toolResult: error TS2322 in api\.ts/);
+        handle = /cp-[0-9a-f]{8}/.exec(result)![0];
+        return fauxAssistantMessage(fauxToolCall('fold', { since: 't2', note: 'x' }));
+      },
+      (context) => {
+        assert.match(
+          text(conversation(context).at(-1)!),
+          /t2 is no longer in your context: it was compacted or already folded\./
+        );
+        return fauxAssistantMessage(fauxToolCall('ask', { handle, question: 'why?' }));
+      },
+      (context) => {
+        assert.match(text(conversation(context).at(-1)!), /too large to ask\. Use recall/);
+        return fauxAssistantMessage('done');
+      }
+    ],
+    { keepRecentTokens: 1 }
+  );
+
+  try {
+    await harness.session.prompt('make it build');
+    await harness.session.prompt('next');
+    await harness.session.compact();
+    await harness.session.prompt('what failed earlier?');
     if (harness.failures[0]) throw harness.failures[0];
     assert.equal(harness.pending(), 0);
   } finally {
