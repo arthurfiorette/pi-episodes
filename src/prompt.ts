@@ -31,7 +31,9 @@ long reads, failed attempts. If the episode opened with reads you still need ver
 such as a file you are about to edit, start after them. A fold pays for itself only above
 roughly 2k tokens; a few short tool results are not worth one. Before folding, check:
 could the next step proceed from the context before the span plus the note alone? If not,
-the episode is still open or the note is missing something.
+the episode is still open or the note is missing something. When the question drifts
+instead of ending, as in open-ended exploration, nothing marks a boundary; do not fold
+yet.
 
 Do not fold right before your final reply to the user; that reply needs the span. If the
 episode was the whole request, fold at the start of the next request, before working on
