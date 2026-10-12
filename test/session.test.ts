@@ -494,3 +494,68 @@ test('after a compaction, recall finds the compacted turns and fold names what i
     await harness.cleanup();
   }
 });
+
+test('a fork folds its own work, and recall and ask reach the fold inside it', async () => {
+  let stamp = '';
+  let nested = '';
+  const harness = await createSession([
+    () => fauxAssistantMessage(fauxToolCall('fork', { task: 'Make the build pass.' })),
+    (context) => {
+      assert.match(text(conversation(context).at(-1)!), /Fold your own finished episodes/);
+      return fauxAssistantMessage(
+        fauxToolCall('bash', { command: 'echo "error TS9999 deep in the loop"' })
+      );
+    },
+    (context) => {
+      stamp = /\[(t\d+)\]$/.exec(text(conversation(context).at(-1)!))![1]!;
+      // The parent's own turns are not the fork's to fold.
+      return fauxAssistantMessage(fauxToolCall('fold', { since: 't1', note: 'x' }));
+    },
+    (context) => {
+      assert.match(
+        text(conversation(context).at(-1)!),
+        /cannot reach behind the start of this fork; a fork folds only its own work\. The earliest stamp you can fold from is /
+      );
+      return fauxAssistantMessage(
+        fauxToolCall('fold', { since: stamp, note: 'Build loop: fixed the type error.' })
+      );
+    },
+    (context) => {
+      const messages = conversation(context);
+      assert.ok(!messages.some((message) => /TS9999/.test(text(message))));
+      const note = text(messages.at(-1)!);
+      assert.match(note, /^\[fold ep-[0-9a-f]{8}: /);
+      nested = /ep-[0-9a-f]{8}/.exec(note)![0];
+      return fauxAssistantMessage('Build passes.\n- Open: none.');
+    },
+    (context) => {
+      const result = text(conversation(context).at(-1)!);
+      assert.match(result, new RegExp(`Folded inside the fork:\\n${nested}: Build loop`));
+      return fauxAssistantMessage(fauxToolCall('recall', { query: 'TS9999' }));
+    },
+    (context) => {
+      const result = text(conversation(context).at(-1)!);
+      // Found under the nested fold, not twice under the fork too.
+      assert.match(result, new RegExp(`${nested} t\\d+ toolResult: error TS9999`));
+      assert.doesNotMatch(result, /fk-[0-9a-f]{8} t\d+ toolResult/);
+      return fauxAssistantMessage(
+        fauxToolCall('ask', { handle: nested, question: 'What failed?' })
+      );
+    },
+    (context) => {
+      const messages = conversation(context);
+      assert.match(text(messages.at(-1)!), /What failed\?/);
+      assert.ok(messages.some((message) => /error TS9999/.test(text(message))));
+      return fauxAssistantMessage('A type error, TS9999.');
+    },
+    () => fauxAssistantMessage('done')
+  ]);
+
+  try {
+    await harness.session.prompt('make it build in a fork');
+    if (harness.failures[0]) throw harness.failures[0];
+    assert.equal(harness.pending(), 0);
+  } finally {
+    await harness.cleanup();
+  }
+});

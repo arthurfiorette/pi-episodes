@@ -7,6 +7,7 @@ import type {
   ExtensionAPI,
   ProjectedSessionEntry
 } from '@earendil-works/pi-coding-agent';
+import { Text } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import {
   appliedFolds,
@@ -19,7 +20,7 @@ import {
 } from './archive.js';
 import { estimateTokens, touchedPaths } from './messages.js';
 import type { DiskChange } from './snapshots.js';
-import { parseStamp, readStamp, stampLabel } from './stamps.js';
+import { parseStamp, readStamp, stampLabel, unstampedText } from './stamps.js';
 import type { EpisodeState } from './state.js';
 import { foldRenderers, formatTokens, refreshStatus } from './ui.js';
 
@@ -100,13 +101,58 @@ function capUserContent(
  * span ends before the response that called fold: that response and the fold result stay,
  * so the context still ends on a tool result.
  */
+export interface FoldableTurn {
+  stamp: number;
+  label: string;
+}
+
+const PREVIEW_WIDTH = 72;
+
+/**
+ * Stamped turns a fold can start from, newest first: those after the latest applied note or
+ * compaction summary, with a one-line preview to recognize them by.
+ */
+export function foldableTurns(entries: readonly ProjectedSessionEntry[]): FoldableTurn[] {
+  const applied = appliedFolds(entries.map((entry) => entry.sourceEntry));
+  const boundary = entries.findLastIndex(
+    (entry) => entry.sourceEntry.type === 'compaction' || isFoldNote(entry, applied)
+  );
+  const turns: FoldableTurn[] = [];
+  for (const entry of entries.slice(boundary + 1)) {
+    for (const message of entry.messages) {
+      const stamp = readStamp(message);
+      if (stamp === undefined || (message.role !== 'user' && message.role !== 'toolResult')) {
+        continue;
+      }
+      const who = message.role === 'user' ? 'you' : message.toolName;
+      const line =
+        unstampedText(message.content)
+          .split('\n')
+          .find((text) => text.trim())
+          ?.trim() ?? '';
+      const preview = line.length > PREVIEW_WIDTH ? `${line.slice(0, PREVIEW_WIDTH - 3)}...` : line;
+      turns.push({ stamp, label: `${stampLabel(stamp)}  ${who}: ${preview}` });
+    }
+  }
+  return turns.reverse();
+}
+
+export interface FoldOptions {
+  /** The newest stamp written in the session, to tell a made-up stamp from one that is gone. */
+  latestStamp?: number;
+  /** No span may start at or before this index; a fork folds only its own work. */
+  floorIndex?: number;
+  /** Handles of folds that took effect, when they are not recorded as session entries. */
+  applied?: ReadonlySet<string>;
+}
+
 export function planFold(
   entries: readonly ProjectedSessionEntry[],
   foldCallId: string,
   since: number,
-  /** The newest stamp written in the session, to tell a made-up stamp from one that is gone. */
-  latestStamp?: number
+  options: FoldOptions = {}
 ): FoldPlan {
+  const { latestStamp, floorIndex = -1 } = options;
   const foldIndex = entries.findIndex((entry) => callsTool(entry, foldCallId));
   if (foldIndex < 0) {
     throw new Error('The response that called fold is not in the current context.');
@@ -123,14 +169,14 @@ export function planFold(
 
   // Nothing before the latest applied note or the compaction summary can be folded: the
   // note already stands for its span, and the summary for everything it replaced.
-  const applied = appliedFolds(entries.map((entry) => entry.sourceEntry));
+  const applied = options.applied ?? appliedFolds(entries.map((entry) => entry.sourceEntry));
   const lastNote = entries.findLastIndex(
     (entry, index) => index < foldIndex && isFoldNote(entry, applied)
   );
   const compaction = entries.findLastIndex(
     (entry, index) => index < foldIndex && entry.sourceEntry.type === 'compaction'
   );
-  const boundary = Math.max(lastNote, compaction);
+  const boundary = Math.max(lastNote, compaction, floorIndex);
   const earliest = entries
     .slice(boundary + 1, foldIndex)
     .flatMap((entry) => entry.messages.map(readStamp))
@@ -168,7 +214,12 @@ export function planFold(
   }
 
   if (startIndex <= boundary) {
-    const what = boundary === lastNote ? 'an earlier fold note' : 'the compaction summary';
+    const what =
+      boundary === lastNote
+        ? 'an earlier fold note'
+        : boundary === compaction
+          ? 'the compaction summary'
+          : 'the start of this fork; a fork folds only its own work';
     throw new Error(`A fold cannot reach behind ${what}. ${pick}`);
   }
 
@@ -363,7 +414,7 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
         ctx.sessionManager.buildSessionProjection().entries,
         toolCallId,
         since,
-        state.nextStamp - 1
+        { latestStamp: state.nextStamp - 1 }
       );
       const sinceLabel = stampLabel(since);
       const lastStamp = plan.spanMessages.map(readStamp).findLast((stamp) => stamp !== undefined);
@@ -483,15 +534,31 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
   });
 
   pi.registerCommand('fold', {
-    description: 'Ask the agent to fold the finished episode now. Optional: /fold t12',
+    description: 'Fold now: pick the turn the span starts at, and the agent writes the note',
     handler: async (args, ctx) => {
-      const since = args.trim() ? parseStamp(args) : undefined;
+      let since = args.trim() ? parseStamp(args) : undefined;
       if (args.trim() && since === undefined) {
         ctx.ui.notify('Usage: /fold [tN]', 'error');
         return;
       }
 
       await ctx.waitForIdle();
+      // Picking the start by hand is the post's baseline: the scope is the user's, so there is
+      // no false fold. Without a dialog to pick in, the agent picks.
+      if (since === undefined && ctx.hasUI) {
+        const turns = foldableTurns(ctx.sessionManager.buildSessionProjection().entries);
+        if (turns.length === 0) {
+          ctx.ui.notify('Nothing can be folded yet: no turns since the last note.', 'info');
+          return;
+        }
+        const choice = await ctx.ui.select(
+          'Fold from which turn? The span runs from there to now; the agent writes the note.',
+          turns.map((turn) => turn.label)
+        );
+        if (choice === undefined) return;
+        since = turns.find((turn) => turn.label === choice)?.stamp;
+        if (since === undefined) return;
+      }
       state.manualFold = true;
       const target =
         since === undefined ? 'Pick the span that is done' : `Use since "${stampLabel(since)}"`;
@@ -504,6 +571,16 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
         { triggerTurn: true }
       );
     }
+  });
+
+  pi.registerMessageRenderer(FOLD_REQUEST_TYPE, (message, _options, theme) => {
+    const text = typeof message.content === 'string' ? message.content : '';
+    const since = /since "(t\d+)"/.exec(text)?.[1];
+    return new Text(
+      theme.fg('dim', `episodes: asked the agent to fold${since ? ` from ${since}` : ''}`),
+      0,
+      0
+    );
   });
 
   pi.registerCommand('episodes', {

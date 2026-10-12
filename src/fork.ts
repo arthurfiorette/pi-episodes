@@ -17,6 +17,7 @@ import {
   writeForkArchive
 } from './archive.js';
 import { changeLines, headline, openItems } from './fold.js';
+import { ForkFolds } from './fork-fold.js';
 import type { ForkRegistry, LiveFork } from './forks-view.js';
 import { textOf, touchedPaths } from './messages.js';
 import { addUsage, emptyUsage, requestOptions } from './requests.js';
@@ -77,6 +78,7 @@ function brief(handle: string, task: string, unavailable: readonly string[]): st
   return [
     `[fork ${handle}] You are a fork of the agent above: same context, same tools, same workspace. The parent waits until you finish and will not see your work, only your final message.`,
     'Do the task below. Then end with a final message written as a note for the parent. Its first line is the result itself, specific enough to stand alone ("Tests pass, 3/3, after regenerating src/client"), not an introduction. Then what changed, what you learned (with caveats), what you decided or rejected and why, and what is still open. Quote exact paths, symbols, commands and error strings.',
+    'Fold your own finished episodes as you would in the main thread; since must be a stamp after this message, as a fork folds only its own work.',
     `Do not ask the user anything. Not available inside a fork: ${unavailable.join(', ')}.`,
     '',
     `Task: ${task}`
@@ -173,7 +175,7 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
       const callable = new Set(ctx.tools.map((tool) => tool.name));
       const unavailable = declared
         .map((tool) => tool.name)
-        .filter((name) => name === FOLD_TOOL || name === FORK_TOOL || !callable.has(name));
+        .filter((name) => name === FORK_TOOL || (name !== FOLD_TOOL && !callable.has(name)));
       const task: AgentMessage = {
         role: 'toolResult',
         toolCallId,
@@ -183,7 +185,15 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
         timestamp: Date.now()
       };
 
-      const options = requestOptions(pi, ctx, prefix, undefined);
+      const folds = new ForkFolds({
+        forkHandle: handle,
+        state,
+        parentEntries: projection.entries,
+        prefixLength: prefix.length,
+        siblings: siblings.length
+      });
+      // The child's view changes as it folds; the cache anchor follows its latest note.
+      const options = requestOptions(pi, ctx, () => folds.view(agent.state.messages), undefined);
       // The agent loop passes its own settings, but not these.
       const limits: Pick<typeof options, 'timeoutMs' | 'maxRetries'> = {};
       if (options.timeoutMs !== undefined) limits.timeoutMs = options.timeoutMs;
@@ -192,10 +202,15 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
         initialState: {
           model,
           thinkingLevel: ctx.thinkingLevel ?? pi.getThinkingLevel(),
-          tools: declared.map((declaration) => childTool(declaration, ctx, unavailable)),
+          tools: declared.map((declaration) =>
+            declaration.name === FOLD_TOOL
+              ? folds.tool(declaration, () => agent.state.messages)
+              : childTool(declaration, ctx, unavailable)
+          ),
           messages: [...prefix, task]
         },
         convertToLlm,
+        transformContext: async (messages) => folds.view(messages),
         streamFn: (requestModel, context, streamOptions) =>
           ctx.modelRegistry.streamSimple(requestModel, context, { ...streamOptions, ...limits }),
         sessionId: ctx.sessionManager.getSessionId()
@@ -220,6 +235,7 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
       };
       agent.subscribe((event) => {
         if (event.type === 'message_end') {
+          folds.stamp(event.message);
           if (event.message.role === 'assistant') {
             turns++;
             live.turns = turns;
@@ -266,6 +282,7 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
       let writing: Promise<unknown> = Promise.resolve();
       const persist = () => {
         archive.messages = agent.state.messages.slice(prefix.length);
+        archive.folds = [...folds.folds];
         if (!dir) {
           state.forkArchives.set(handle, archive);
           return;
@@ -352,8 +369,15 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
               note || '(the fork ended without a final message)',
               '',
               ...changeLines(changes, touched, state.cwd),
+              ...(folds.folds.length > 0
+                ? [
+                    '',
+                    'Folded inside the fork:',
+                    ...folds.folds.map((fold) => `${fold.record.handle}: ${fold.record.headline}`)
+                  ]
+                : []),
               '',
-              `Full transcript archived as ${handle}: recall searches it, ask("${handle}", "<question>") asks it.`
+              `Full transcript archived as ${handle}: recall searches it and the folds inside it, ask("${handle}", "<question>") asks it.`
             ].join('\n')
           }
         ],

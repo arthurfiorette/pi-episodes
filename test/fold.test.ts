@@ -3,7 +3,14 @@ import { test } from 'node:test';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { convertToLlm, type SessionManager } from '@earendil-works/pi-coding-agent';
 import { FOLD_APPLIED_TYPE } from '../src/archive.js';
-import { headline, openItems, planFold, renderNote, USER_TEXT_CAP } from '../src/fold.js';
+import {
+  foldableTurns,
+  headline,
+  openItems,
+  planFold,
+  renderNote,
+  USER_TEXT_CAP
+} from '../src/fold.js';
 import { readStamp } from '../src/stamps.js';
 import { assistant, call, result, session, user } from './helpers.js';
 
@@ -141,7 +148,7 @@ test('rejects stamps that are missing, after the call, or leave nothing to fold'
   const entries = manager.buildSessionProjection().entries;
 
   assert.throws(
-    () => planFold(entries, 'f1', 99, 5),
+    () => planFold(entries, 'f1', 99, { latestStamp: 5 }),
     /t99 does not exist; the latest stamp is t5\. The earliest stamp you can fold from is t1\./
   );
   assert.throws(() => planFold(entries, 'missing', 2), /called fold is not in the current context/);
@@ -266,10 +273,28 @@ test('after a compaction, stamps the summary mentions are gone and the kept ones
   const entries = manager.buildSessionProjection().entries;
 
   assert.throws(
-    () => planFold(entries, 'f', 2, 5),
+    () => planFold(entries, 'f', 2, { latestStamp: 5 }),
     /t2 is no longer in your context: it was compacted or already folded\. The earliest stamp you can fold from is t3\./
   );
-  const plan = planFold(entries, 'f', 3, 5);
+  const plan = planFold(entries, 'f', 3, { latestStamp: 5 });
   assert.equal(plan.anchorStamp, undefined);
   assert.equal(plan.keptUserTurns.join(), 't3');
+});
+
+test('lists the turns a fold can start from, newest first, after the latest note', () => {
+  const { manager } = session(buildLoop);
+  assert.deepEqual(
+    foldableTurns(manager.buildSessionProjection().entries).map((turn) => turn.label),
+    [
+      't5  bash: build passed',
+      't4  you: do not edit generated files',
+      't3  bash: src/client/api.ts(12,5): error TS2322',
+      't2  read: export function claim() {}',
+      't1  you: add the claim endpoint'
+    ]
+  );
+  assert.deepEqual(
+    foldableTurns(earlierFold(true)).map((turn) => turn.stamp),
+    [4]
+  );
 });

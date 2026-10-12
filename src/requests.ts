@@ -11,13 +11,14 @@ import { anchorBreakpoint, cacheAnchor } from './cache.js';
 export function requestOptions(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  messages: readonly AgentMessage[],
+  /** The messages being sent, or a way to read them per request when they keep changing. */
+  messages: readonly AgentMessage[] | (() => readonly AgentMessage[]),
   signal: AbortSignal | undefined
 ): ModelsSimpleStreamOptions {
-  const anchor = cacheAnchor(messages);
+  const current = typeof messages === 'function' ? messages : () => messages;
   const options: ModelsSimpleStreamOptions = {
     sessionId: ctx.sessionManager.getSessionId(),
-    onPayload: (payload) => anchorBreakpoint(payload, anchor)
+    onPayload: (payload) => anchorBreakpoint(payload, cacheAnchor(current()))
   };
   const level = ctx.thinkingLevel ?? pi.getThinkingLevel();
   if (level !== 'off') options.reasoning = level;

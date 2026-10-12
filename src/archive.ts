@@ -116,6 +116,24 @@ function compactionRecord(entry: CompactionEntry): CompactionRecord {
   };
 }
 
+/** A fold made inside a fork. Indices point into the fork archive's `messages`. */
+export interface NestedFold {
+  record: FoldDetails;
+  first: number;
+  last: number;
+  /** Messages the fold hid from the child's view. */
+  omit: number[];
+}
+
+/** Messages left after hiding what the given nested folds omitted. */
+function withoutFolded(
+  messages: readonly AgentMessage[],
+  folds: readonly NestedFold[]
+): AgentMessage[] {
+  const omitted = new Set(folds.flatMap((fold) => fold.omit));
+  return messages.filter((_, index) => !omitted.has(index));
+}
+
 export interface ForkArchive {
   handle: string;
   task: string;
@@ -124,6 +142,8 @@ export interface ForkArchive {
   siblings?: AgentMessage[];
   /** Messages the child added after the parent prefix, starting with the task. */
   messages: AgentMessage[];
+  /** Folds the child made of its own work, in order. */
+  folds?: NestedFold[];
 }
 
 export interface Thread {
@@ -217,12 +237,12 @@ export class ThreadIndex {
   async onBranch(): Promise<Thread[]> {
     const threads: Thread[] = [];
     for (const record of threadRecords(this.sessions.getBranch())) {
+      if (record.kind === 'fork') {
+        threads.push(...(await this.forkThreads(record)));
+        continue;
+      }
       const thread =
-        record.kind === 'fold'
-          ? this.foldThread(record)
-          : record.kind === 'fork'
-            ? await this.forkThread(record)
-            : this.compactionThread(record);
+        record.kind === 'fold' ? this.foldThread(record) : this.compactionThread(record);
       if (thread) threads.push(thread);
     }
     return threads;
@@ -233,8 +253,11 @@ export class ThreadIndex {
     const entries = this.sessions.getEntries();
     const fold = foldRecords(entries).find((record) => record.handle === handle);
     if (fold) return this.foldThread(fold);
-    const fork = forkRecords(entries).find((record) => record.handle === handle);
-    if (fork) return this.forkThread(fork);
+    // A fork's handle, or a fold made inside one: the fork's archive holds both.
+    for (const fork of forkRecords(entries)) {
+      const thread = (await this.forkThreads(fork)).find((found) => found.handle === handle);
+      if (thread) return thread;
+    }
     const compaction = entries.find(
       (entry): entry is CompactionEntry =>
         entry.type === 'compaction' && compactionHandle(entry.id) === handle
@@ -301,22 +324,45 @@ export class ThreadIndex {
     };
   }
 
-  private async forkThread(fork: ForkDetails): Promise<Thread | undefined> {
+  /**
+   * The fork, then the folds it made of its own work. The fork's thread holds what the child
+   * saw at the end, so a span folded inside it is matched under its own handle only.
+   */
+  private async forkThreads(fork: ForkDetails): Promise<Thread[]> {
     const archive = this.memory.get(fork.handle) ?? (await readArchive(fork.archive));
-    if (!archive) return undefined;
+    if (!archive) return [];
 
-    return {
-      handle: fork.handle,
-      kind: 'fork',
-      label: `fork: ${fork.task.slice(0, 80)}`,
-      messages: archive.messages,
-      context: () => [
-        ...buildSessionProjection(this.sessions.getEntries(), fork.parentEntryId).messages,
-        ...(archive.siblings ?? []),
-        ...archive.messages
-      ],
-      record: fork
-    };
+    const folds = archive.folds ?? [];
+    const prefix = () => [
+      ...buildSessionProjection(this.sessions.getEntries(), fork.parentEntryId).messages,
+      ...(archive.siblings ?? [])
+    ];
+    const visible = withoutFolded(archive.messages, folds);
+    const threads: Thread[] = [
+      {
+        handle: fork.handle,
+        kind: 'fork',
+        label: `fork: ${fork.task.slice(0, 80)}`,
+        messages: visible,
+        context: () => [...prefix(), ...visible],
+        record: fork
+      }
+    ];
+    folds.forEach((fold, order) => {
+      threads.push({
+        handle: fold.record.handle,
+        kind: 'fold',
+        label: `${fold.record.until ? `turns ${fold.record.since}-${fold.record.until}` : `turns from ${fold.record.since} on`}, inside ${fork.handle}`,
+        messages: archive.messages.slice(fold.first, fold.last + 1),
+        // What the child saw when it folded: its earlier folds applied, this one not yet.
+        context: () => [
+          ...prefix(),
+          ...withoutFolded(archive.messages.slice(0, fold.last + 1), folds.slice(0, order))
+        ],
+        record: fold.record
+      });
+    });
+    return threads;
   }
 }
 
