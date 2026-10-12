@@ -1,0 +1,36 @@
+name: Code CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test code
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/setup@v3
+        with:
+          cache: true
+          install: true
+
+      - name: Lint
+        run: pnpm lint-ci
+
+      - name: Build code
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm test-types
+
+      - name: Test
+        run: pnpm test

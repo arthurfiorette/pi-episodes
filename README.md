@@ -1,0 +1,140 @@
+<p align="center">
+   <b>Using this package?</b> Please consider <a href="https://github.com/sponsors/arthurfiorette" target="_blank">donating</a> to support my open source work ❤️
+  <br />
+  <sup>
+   Help pi-episodes grow! Star and share this amazing repository with your friends and co-workers!
+  </sup>
+</p>
+
+<br />
+
+# Pi Episodes
+
+**Fold finished work out of the context instead of compacting it.** A [pi](https://github.com/earendil-works/pi) package that lets the agent close an episode, such as a build loop, into a short note while the full span stays archived, searchable and askable.
+
+Compaction summarizes the whole session at once, when the window fills. `pi-episodes` asks the agent to summarize one piece of work when that work ends: "the build passes, where was I?". The span leaves the context, a note takes its place, and the agent can still grep it or question it later. The same archive backs `fork`, which runs a copy of the agent with its current context instead of a subagent that starts from an empty prompt.
+
+> [!WARNING]
+> This is an experiment. Whether a model notices when an episode ends, and writes notes that keep the caveats a later step needs, is exactly what it is meant to find out. Pi's normal compaction stays enabled as a fallback.
+
+**Requirements:** Node.js 24.16+ and pi 1.1+. [Get started](#get-started) · [How it works](#how-it-works) · [Tools](#tools) · [Prompt caching](#prompt-caching) · [Limitations](#limitations) · [Measurements](MEASUREMENTS.md)
+
+<br />
+
+## Get started
+
+1. Install the package:
+
+   ```sh
+   pi install npm:pi-episodes
+   ```
+
+2. Start pi and work as usual. The agent sees four new tools and a short system prompt section that explains when to use them.
+
+3. To try the note format before trusting the model to notice boundaries on its own, ask for a fold after a finished loop. The agent still picks the span (unless you name the stamp) and writes the note; the run ends on the fold:
+
+   ```text
+   /fold
+   /fold t13
+   ```
+
+   `/episodes` lists what is archived on the current branch.
+
+<br />
+
+## How it works
+
+Every user message and tool result gets a **turn stamp** such as `[t12]`, appended as its own text block when the message is saved. Stamps are written once and never edited, so they never change bytes that are already in the prompt cache.
+
+When an episode is done, the agent calls `fold(since: "t13", note: "...")`, where `t13` is the first stamped message inside the episode. If that is a tool result, the span starts at the response that made the call, so a tool call never loses its result. From there up to the fold call, the span leaves the model's context:
+
+| In the span | After the fold |
+| --- | --- |
+| Assistant responses and tool results | Removed from context, kept in the session file |
+| User messages | Kept verbatim with their stamps, so a mid-episode correction still reads as one; pastes over 4,000 characters are cut, with a pointer to the archive |
+| Extension messages | Removed |
+| The fold call and its result | Kept; the result is the note |
+
+The harness extends the note with what changed on disk during the span, the stamps of the user messages that stayed, and a handle such as `ep-1a2b3c4d` that points at the archive. Disk changes come from a working tree diff, so files a shell command generated are listed too; files ignored by git are not.
+
+Nothing is deleted. A fold appends `context_edit` entries to the session, which only change what the model sees from then on; `/tree`, exports and the session file still hold the full span. A fold cannot reach back past the previous note, so notes on one line never contain each other.
+
+On screen, the folded messages stay where they were. What marks the fold is its own block (`▸ ep-1a2b3c4d  4 messages, ~41k tokens archived` with the note behind ctrl+o), a notification, and the footer status. See [Limitations](#limitations) for why the span itself does not collapse.
+
+<br />
+
+## Tools
+
+| Tool | What it does | Cost |
+| --- | --- | --- |
+| `fold(since, note)` | Replaces the span starting at `since` with `note` and archives it. | One tool call. The cache is rewritten from the newest fold note or user message before the span (see [Prompt caching](#prompt-caching)). |
+| `recall(query)` | Greps the archived spans and forks on the current branch: tool outputs, the agent's own messages and reasoning, tool arguments. Returns lines with their handle and turn. With a handle, it searches that thread on any branch. Matches past the limit (30 by default, 200 at most) are written to a file next to the fork transcripts, so a broad query costs a path, not the context. | No model call. |
+| `ask(handle, question)` | Resumes an archived thread with everything it held, asks one question, returns only the answer. | One model call over the thread's context, cached if the provider still has it. |
+| `fork(task)` | Runs a copy of the agent, starting from its current context, until the task is done, and returns its final note plus what changed on disk. Tool calls go through the parent's tools, hooks and permissions. | The child's prefix is the parent's, so it is a cache hit on every child turn. |
+
+Two cues help the agent go back when it does not know it should:
+
+- **File touch:** when `read`, `edit` or `write` touches a file that a folded span or fork changed or used, the result says so once per file, with the handle.
+- **Staleness:** `recall` and `ask` mention when files a thread relied on have changed since it was archived.
+
+`fork` is meant for work that continues the agent's own, such as making the build pass. It is deliberately not a reviewer: a review is useful because it does not share the author's assumptions.
+
+While a fork runs, a widget above the editor shows its turn, elapsed time and current tool. `ctrl+shift+e` or `/forks` opens an overlay with every fork of the session, running or finished, and the child's transcript as it grows: tab switches fork, arrows scroll, esc closes.
+
+<br />
+
+## Prompt caching
+
+Each request reads and refreshes only its longest matching cache entry. During a long episode, the entry where the episode started is no longer the longest match, so it expires, and the fold that ends the episode would rewrite everything before it.
+
+With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note or user message, whichever is later. A fold cannot start before the latest note, and episodes usually start after a user message, so that is the closest point before the next fold that is already known; the fold rewrites the cache from there on. With an API key, pi leaves one of the four breakpoints free and it is used. With OAuth all four are taken, so the breakpoint of the required "You are Claude Code" block moves instead. Anthropic caches tools, then system, then messages, and the system prompt's own breakpoint already covers that block, so nothing that was cached before stops being cached.
+
+`ask` and `fork` send the same session id, prompt, tools and thinking settings as the main thread, so their prefixes match it byte for byte.
+
+<br />
+
+## What is stored where
+
+| Data | Location |
+| --- | --- |
+| Stamps, notes, fold and fork records | The session file, on the messages and tool results themselves |
+| Fork transcripts | `<session>.episodes/<handle>.json` next to the session file, or memory for `--no-session` |
+| Recall overflow | `<session>.episodes/recall-<time>-<query>.txt`, or the OS temp directory for `--no-session` |
+| Working tree snapshots | A private git index and object store in the OS temp directory, using the repository's objects read-only; removed when the session ends. The repository's index, stash and `.git/objects` are never written |
+
+<br />
+
+## Limitations
+
+- Prompting is the only way the model learns the habit; there is no training behind it. Expect folds to be late, early or missing caveats until the prompt is tuned against real sessions. [MEASUREMENTS.md](MEASUREMENTS.md) lists what to measure, in order.
+- A snapshot (`git add -A` and `git write-tree` against the private index) runs in the background for every stamped message, and the next tool call waits for it. Unchanged files are not hashed again, but large untracked files are, every time they change.
+- Snapshots only live as long as the session. After a restart, a fold that reaches back past it lists the files that `read`, `edit` and `write` touched instead of a diff, and older threads get no staleness notes. Outside a git repository that is always the case.
+- The disk diff is the working tree's, not the agent's. Files you edit in another window while an episode runs are listed in its note as changed. Parallel forks share one working tree the same way.
+- Forks run without pi's compaction or run-level retry, so `fork` refuses to start when the context is over 70% full. A fork is stopped after 30 minutes (`episodes.forkTimeoutMs` in pi's settings); its work so far stays archived, and the transcript is written after every turn so a crash or `/reload` mid-fork keeps it.
+- Requests made by `ask` and `fork` skip other extensions' `context` and `before_provider_request` hooks, so the byte-identical prefix only holds when no other extension rewrites requests.
+- Inside a fork, `fold` and `fork` are unavailable. Nested folds inside forks are not implemented yet.
+- `!` command output inside a span cannot be removed by pi's context edits and stays in context.
+- Stamps are part of the saved messages, so they are visible in the transcript and session pickers.
+- **Folded messages do not collapse in the transcript**, the way a subagent's work shows as one block. Pi's TUI rebuilds the transcript from the session entries and ignores `context_edit`, which only shapes the model's view. Extensions can render their own tool calls, custom messages and custom entries, but cannot hide, dim or re-render earlier user, assistant or tool messages, and the chat container is not exposed. Collapsing the span needs a change in pi: render a run of omitted entries as one expandable row, rebuild the chat when a `context_edit` entry is appended, and ideally let the edit carry a label such as the fold's handle. Pi's own overflow recovery omits failed attempts with the same mechanism and leaves them on screen too, so the change is useful on its own. Not sent as a PR yet.
+
+<br />
+
+## Acknowledgements
+
+The ideas come from [a post on subagents, forks and collapsing context](https://arthur.place/subagents-forks-collapsing-context) and the research it leans on: Event Segmentation Theory (Zacks & Swallow 2007; Kurby & Zacks 2008) and the goal-activation model (Altmann & Trafton 2002). See [MEASUREMENTS.md](MEASUREMENTS.md) for how each one turns into something to measure.
+
+Several details of `fork` were taken from [pi-subagents](https://github.com/nicobailon/pi-subagents) by Nico Bailon, after comparing the two: the live view of a running child (its fleet inspector overlay and status widget), the wall-clock timeout, writing the child's transcript as it grows rather than at the end, and showing tokens and cost on the result card. `pi-episodes` does not depend on it or register its tools. The two make different bets: a pi-subagents child is a full pi session with its own system prompt and agent definition, while a fork is a copy of the running agent that keeps the parent's prompt, tools and folded view byte for byte, so its requests hit the parent's prompt cache. If you want agents with their own prompts, background runs, chains or worktree isolation, use pi-subagents.
+
+<br />
+
+## Contributing
+
+1. Use Node.js 24.16+ and pnpm 12, then install dependencies with `pnpm install`.
+2. Run `pnpm test-types`, `pnpm test` and `pnpm lint-ci`. The session tests run the extension inside a real pi session against pi's faux provider, so no API key is needed.
+3. Run `pnpm build` and load the result with `pi -e .` to try it by hand.
+
+<br />
+
+## License
+
+[MIT](LICENSE).
