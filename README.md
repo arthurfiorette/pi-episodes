@@ -8,16 +8,24 @@
 
 <br />
 
+<p align="center" title="My take on subagents, forks and collapsing context">
+  <a href="https://arthur.place/subagents-forks-collapsing-context">
+    <img src="https://raw.githubusercontent.com/arthurfiorette/pi-episodes/main/assets/cover.jpg" width="640" alt="A red thread winds through a landscape of papers, maps, and filing drawers." />
+  </a>
+</p>
+
 # Pi Episodes
 
 **Fold finished work out of the context instead of compacting it.** A [pi](https://github.com/earendil-works/pi) package that lets the agent close an episode, such as a build loop, into a short note while the full span stays archived, searchable and askable.
 
-Compaction summarizes the whole session at once, when the window fills. `pi-episodes` asks the agent to summarize one piece of work when that work ends: "the build passes, where was I?". The span leaves the context, a note takes its place, and the agent can still search it or question it later. The same archive backs `fork`, which runs a copy of the agent with its current context instead of a subagent that starts from an empty prompt.
+> [!NOTE]
+> This package implements the post **[My take on subagents, forks and collapsing context](https://arthur.place/subagents-forks-collapsing-context)**. The post makes the argument, the research behind it and the open questions; this README covers how the package behaves.
 
-> [!WARNING]
-> This is an experiment. Whether a model notices when an episode ends, and writes notes that keep the caveats a later step needs, is exactly what it is meant to find out. Pi's normal compaction stays enabled as a fallback.
+Compaction summarizes the whole session at once, when the window fills. `pi-episodes` asks the agent to summarize one piece of work when that work ends: "the build passes, where was I?". The span leaves the context, a note takes its place, and the agent can still search it or question it later. The same archive backs `fork`, which runs a copy of the agent with its current context instead of a subagent that starts from an empty prompt. Pi's own compaction stays as the fallback.
 
-**Requirements:** Node.js 24.16+ and pi 1.1+. [Get started](#get-started) · [How it works](#how-it-works) · [Tools](#tools) · [Prompt caching](#prompt-caching) · [Limitations](#limitations) · [Measurements](MEASUREMENTS.md)
+The terms, as in the post: an **episode** is one span of work around a local question. A **fold** replaces a finished episode with a short **note** plus a **handle** that points back to the archived span. A **fork** runs a copy of the agent with the parent's current context. **recall** searches the archive without a model call, and **ask** puts one question to an archived thread.
+
+**Requirements:** Node.js 24.16+ and pi 1.1+. [The post](https://arthur.place/subagents-forks-collapsing-context) · [Get started](#get-started) · [How it works](#how-it-works) · [Tools](#tools) · [Prompt caching](#prompt-caching) · [Limitations](#limitations) · [Measurements](MEASUREMENTS.md)
 
 <br />
 
@@ -39,6 +47,10 @@ Compaction summarizes the whole session at once, when the window fills. `pi-epis
    ```
 
    `/episodes` lists what is archived on the current branch.
+
+4. Then give it a task that depends on something inside the fold, and watch what it does with the note: carry on from it, go back with `recall` or `ask`, or guess. That is the smallest experiment the post suggests, and [MEASUREMENTS.md](MEASUREMENTS.md) builds from there.
+
+If you try it, [open an issue](https://github.com/arthurfiorette/pi-episodes/issues) with what the agent did with its notes. How it feels after a week of real work says more than any benchmark so far.
 
 <br />
 
@@ -138,7 +150,7 @@ With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note o
 
 ## Acknowledgements
 
-The ideas come from [a post on subagents, forks and collapsing context](https://arthur.place/subagents-forks-collapsing-context) and the research it leans on: Event Segmentation Theory (Zacks & Swallow 2007; Kurby & Zacks 2008) and the goal-activation model (Altmann & Trafton 2002). See [MEASUREMENTS.md](MEASUREMENTS.md) for how each one turns into something to measure.
+The design follows [the post](https://arthur.place/subagents-forks-collapsing-context), and through it the research it leans on: Event Segmentation Theory (Zacks & Swallow 2007; Kurby & Zacks 2008) and the goal-activation model (Altmann & Trafton 2002). [MEASUREMENTS.md](MEASUREMENTS.md) turns each into something to measure. The cover image is the post's.
 
 Several details of `fork` were taken from [pi-subagents](https://github.com/nicobailon/pi-subagents) by Nico Bailon, after comparing the two: the live view of a running child (its fleet inspector overlay and status widget), the wall-clock timeout, writing the child's transcript as it grows rather than at the end, and showing tokens and cost on the result card. `pi-episodes` does not depend on it or register its tools. The two make different bets: a pi-subagents child is a full pi session with its own system prompt and agent definition, while a fork is a copy of the running agent that keeps the parent's prompt, tools and folded view byte for byte, so its requests hit the parent's prompt cache. If you want agents with their own prompts, background runs, chains or worktree isolation, use pi-subagents.
 
