@@ -8,6 +8,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, join, matchesGlob, resolve } from 'node:path';
 import { parse } from 'yaml';
+import { runHarbor } from './harbor.js';
+import { prepull } from './pull.js';
 
 const BENCH = resolve(import.meta.dirname, '..');
 const REPO = resolve(BENCH, '..');
@@ -64,7 +66,10 @@ function load(job: string): BenchConfig {
 }
 
 function harbor(args: string[], env: NodeJS.ProcessEnv = process.env): number {
-  const result = spawnSync('harbor', args, { stdio: 'inherit', env });
+  const result = spawnSync('harbor', args, {
+    stdio: 'inherit',
+    env: { ...env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
+  });
   if (result.error) throw result.error;
   return result.status ?? 1;
 }
@@ -139,23 +144,6 @@ function tasksByLanguage(
   return names.sort();
 }
 
-/**
- * Pulls task images one at a time before Harbor starts. Registries such as ECR Public
- * rate-limit anonymous pulls, and a refused pull mid-run fails the trial as an error.
- */
-function prepull(images: readonly string[]): void {
-  for (const image of images) {
-    if (spawnSync('docker', ['image', 'inspect', image], { stdio: 'ignore' }).status === 0)
-      continue;
-    for (let attempt = 1; ; attempt++) {
-      console.error(`pulling ${image} (${attempt})`);
-      if (spawnSync('docker', ['pull', '--quiet', image], { stdio: 'inherit' }).status === 0) break;
-      if (attempt === 5) throw new Error(`Could not pull ${image}`);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 15_000);
-    }
-  }
-}
-
 /** `local` packs this checkout (prepack builds it); anything else is a pi package source. */
 function episodesSource(episodes: string): string {
   if (episodes !== 'local') return episodes;
@@ -181,7 +169,10 @@ function episodesSource(episodes: string): string {
 }
 
 function stamp(): string {
-  return new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+  return new Date()
+    .toISOString()
+    .replace(/[-:.Z]/g, '')
+    .replace('T', '-');
 }
 
 function harborConfig(
@@ -242,7 +233,7 @@ function values(args: readonly string[], flag: string): string[] {
   return args.flatMap((arg, index) => (arg === flag && args[index + 1] ? [args[index + 1]!] : []));
 }
 
-function main(): number {
+async function main(): Promise<number> {
   const separator = process.argv.indexOf('--');
   const own = separator === -1 ? process.argv.slice(2) : process.argv.slice(2, separator);
   const passthrough = separator === -1 ? [] : process.argv.slice(separator + 1);
@@ -284,7 +275,7 @@ function main(): number {
     const selected = all.filter(
       (task) => !tasks || tasks.some((pattern) => matchesGlob(task.name, pattern))
     );
-    prepull([...new Set(selected.flatMap((task) => (task.image ? [task.image] : [])))]);
+    await prepull([...new Set(selected.flatMap((task) => (task.image ? [task.image] : [])))]);
   }
 
   const out = join(BENCH, '.out');
@@ -296,7 +287,7 @@ function main(): number {
   );
 
   const envFile = join(BENCH, '.env');
-  return harbor(
+  return runHarbor(
     [
       'run',
       '-c',
@@ -309,8 +300,9 @@ function main(): number {
       ...process.env,
       ...secrets,
       PYTHONPATH: [join(BENCH, 'agents'), process.env.PYTHONPATH].filter(Boolean).join(delimiter)
-    }
+    },
+    !dryRun && config.environment === 'docker'
   );
 }
 
-process.exit(main());
+process.exit(await main());

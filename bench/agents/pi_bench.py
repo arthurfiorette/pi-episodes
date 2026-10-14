@@ -110,6 +110,7 @@ class PiBench(Pi):
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=STATS_TIMEOUT_SEC,
                 check=True,
                 cwd=REPO,

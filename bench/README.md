@@ -22,7 +22,7 @@ cp bench/.env.example bench/.env   # API keys; git-ignored
 
 `bench/.env` is read by Harbor on the host. A variable reaches the sandbox only if a config names it under `env`. Harbor forwards the key of the selected model's provider to the pi adapter automatically (`ANTHROPIC_API_KEY` for `anthropic/...`, and so on).
 
-On Windows, use Docker Desktop's Linux containers. In PowerShell, copy the environment template with `Copy-Item bench/.env.example bench/.env`. If `harbor --version` is not found after installation, run `uv tool update-shell` and restart the terminal. The host scripts handle Windows paths and package-manager shims; native Windows Harbor execution still needs a smoke test. WSL2 is the fallback if Harbor itself fails on Windows.
+On Windows, use Docker Desktop's Linux containers. In PowerShell, copy the environment template with `Copy-Item bench/.env.example bench/.env`. If `harbor --version` is not found after installation, run `uv tool update-shell` and restart the terminal. The runner enables Python UTF-8 mode so Harbor can read agent logs regardless of the Windows code page. The host scripts handle Windows paths and package-manager shims; native Windows Harbor execution still needs a smoke test. WSL2 is the fallback if Harbor itself fails on Windows.
 
 ### Local settings
 
@@ -66,10 +66,12 @@ pnpm bench:run deep-swe -- --upload        # and upload trials to Harbor Hub as 
 1. reads `bench/jobs/<job>.yaml` and applies `bench/local.yaml`;
 2. downloads the dataset to `bench/.cache` once, to pick tasks by language;
 3. packs this checkout with `pnpm pack` when `episodes: local`, so the episodes arm runs the working tree, not a release;
-4. pulls the task images one at a time with retries (ECR Public rate-limits anonymous pulls, and a refused pull fails the trial);
+4. pulls up to four task images concurrently with retries and a shared exponential cooldown on rate limits (ECR Public rate-limits anonymous pulls, and a refused pull fails the trial);
 5. writes the Harbor config to `bench/.out/<job>-<time>.json` and runs it.
 
 Results go to `bench/runs/<job>-<time>/`. A full default run is 34 tasks × 3 attempts × 2 arms = 204 trials per model, each up to 90 minutes; set `concurrency` to what the machine and the model's rate limits take.
+
+While Harbor runs in an interactive terminal, type **q** followed by **Enter**, or press **Ctrl+C**, to abort. On macOS/Linux, the runner allows Harbor up to 30 seconds for graceful cancellation; on Windows, it terminates Harbor's process tree because Node cannot deliver a graceful Unix signal there. After an abort or abnormal exit, it removes leftover Docker containers and networks belonging to that run, including verifier containers and network sidecars. Images and existing result files are retained, but interrupted trials may lose final logs or results. Wait for cleanup to finish before closing the terminal; force-killing the runner bypasses cleanup.
 
 <br />
 

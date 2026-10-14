@@ -21,6 +21,7 @@ attempts: 3
 
 models:
   - anthropic/claude-sonnet-5-5
+  - openai/gpt-6-luna
 thinking: high
 
 # pi inside the container, the same in both arms.

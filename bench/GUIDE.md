@@ -85,7 +85,7 @@ Read [`src/harbor/agents/installed/pi.py`](https://github.com/harbor-framework/h
 
 | Symptom | Cause | Fix in place |
 | --- | --- | --- |
-| Trial fails in seconds with `toomanyrequests: Rate exceeded` | ECR Public limits anonymous image pulls | The runner pre-pulls images one at a time with retries before Harbor starts |
+| Trial fails in seconds with `toomanyrequests: Rate exceeded` | ECR Public limits anonymous image pulls | The runner pre-pulls at most four images concurrently, with retries and a shared exponential cooldown on rate limits, before Harbor starts |
 | Episodes arm fails at install with `EBADDEVENGINES` | `devEngines` said Node `>=24.16` with `onFail: "error"`; the adapter installs Node 22 | Requirements lowered to pi's own `>=22.19.0`, `onFail: "warn"`. Keep the runtime requirement at or below what the adapter installs |
 | `npm:pi-episodes@0.3.0` fails to install | That version was never published | Use `episodes: local` (packs the working tree) or a version that exists and includes the stats (`fca51a8` or later) |
 | Warning "Artifact sources overlap: '/logs/artifacts' and '/logs/artifacts/model.patch'" | DeepSWE declares the patch as an artifact inside Harbor's default artifacts dir | Harmless; the patch is still collected |
