@@ -44,7 +44,15 @@ export interface CueEvent {
   matched: number;
 }
 
-export type EpisodeEvent = FoldRejectedEvent | CueEvent;
+export interface NudgeEvent {
+  kind: 'nudge';
+  /** The tool call whose result carried the nudge. */
+  toolCallId: string;
+  /** Estimated tokens of that result. */
+  tokens: number;
+}
+
+export type EpisodeEvent = FoldRejectedEvent | CueEvent | NudgeEvent;
 
 export function recordEvent(pi: ExtensionAPI, event: EpisodeEvent): void {
   pi.appendEntry(EVENT_TYPE, event);

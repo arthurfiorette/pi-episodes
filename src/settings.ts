@@ -13,6 +13,9 @@ export interface EpisodesSettings {
   compactionNotice: boolean;
   /** Keep a cache breakpoint where the next fold can start. Off only to measure what it saves. */
   cacheAnchor: boolean;
+  /** End a tool result over `heavyResultTokens` with a line asking for a fold once it is used. */
+  heavyResultNudge: boolean;
+  heavyResultTokens: number;
 }
 
 const DEFAULTS: EpisodesSettings = {
@@ -20,7 +23,9 @@ const DEFAULTS: EpisodesSettings = {
   openReminder: true,
   openReminderMaxTokens: 300,
   compactionNotice: true,
-  cacheAnchor: true
+  cacheAnchor: true,
+  heavyResultNudge: true,
+  heavyResultTokens: 8000
 };
 
 function flag(value: unknown, fallback: boolean): boolean {
@@ -38,6 +43,8 @@ export function episodesSettings(settings: object): EpisodesSettings {
     openReminder: flag(raw.openReminder, DEFAULTS.openReminder),
     openReminderMaxTokens: positive(raw.openReminderMaxTokens, DEFAULTS.openReminderMaxTokens),
     compactionNotice: flag(raw.compactionNotice, DEFAULTS.compactionNotice),
-    cacheAnchor: flag(raw.cacheAnchor, DEFAULTS.cacheAnchor)
+    cacheAnchor: flag(raw.cacheAnchor, DEFAULTS.cacheAnchor),
+    heavyResultNudge: flag(raw.heavyResultNudge, DEFAULTS.heavyResultNudge),
+    heavyResultTokens: positive(raw.heavyResultTokens, DEFAULTS.heavyResultTokens)
   };
 }

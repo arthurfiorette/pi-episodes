@@ -13,7 +13,7 @@ import { COMPACTION_NOTICE_TYPE } from './compaction.js';
 import { type EpisodeEvent, EVENT_TYPE } from './events.js';
 import { EPISODES_SECTION } from './prompt.js';
 import { REMINDER_TYPE } from './reminder.js';
-import { isStampBlock } from './stamps.js';
+import { isStampBlock, parseStamp, readStamp } from './stamps.js';
 import type { AskDetails, RecallDetails, StaleThread } from './ui.js';
 
 /** The prompt's threshold: folding less than this saves less than the note and cache write cost. */
@@ -66,6 +66,8 @@ export interface EpisodeStats {
   ask: { count: number };
   stale: { shown: number; reread: number };
   cues: { shown: number; followed: number; readOnly: number; capped: number };
+  /** Heavy-result nudges, and those followed by a fold covering that result. */
+  nudges: { shown: number; followed: number };
   forks: {
     count: number;
     turns: number;
@@ -161,6 +163,7 @@ export function episodeStats(entries: readonly SessionEntry[], cwd: string): Epi
     ask: { count: 0 },
     stale: { shown: 0, reread: 0 },
     cues: { shown: 0, followed: 0, readOnly: 0, capped: 0 },
+    nudges: { shown: 0, followed: 0 },
     forks: { count: 0, turns: 0, folds: 0, failed: 0, refused: 0, cost: 0 },
     compactions: 0,
     reminders: 0,
@@ -186,6 +189,27 @@ export function episodeStats(entries: readonly SessionEntry[], cwd: string): Epi
         return (found.details as RecallDetails | undefined)?.hits?.includes(handle) ?? false;
       }
       return false;
+    });
+  };
+
+  /** An applied fold within the next few responses whose span holds the nudged result. */
+  const foldedAfter = (index: number, toolCallId: string) => {
+    const nudged = entries.find((entry) => {
+      const found = message(entry);
+      return found?.role === 'toolResult' && found.toolCallId === toolCallId;
+    });
+    const result = message(nudged);
+    const stamp = result ? readStamp(result) : undefined;
+    if (stamp === undefined) return false;
+    const ids = new Set(callsAfter(entries, index, FOLLOW_WINDOW).map((call) => call.id));
+    return entries.some((entry) => {
+      const found = message(entry);
+      if (found?.role !== 'toolResult' || found.isError || !ids.has(found.toolCallId)) return false;
+      if (found.toolName !== FOLD_TOOL || !isFoldDetails(found.details)) return false;
+      if (!applied.has(found.details.handle)) return false;
+      const since = parseStamp(found.details.since);
+      const until = found.details.until ? parseStamp(found.details.until) : undefined;
+      return since !== undefined && since <= stamp && (until === undefined || stamp <= until);
     });
   };
 
@@ -235,6 +259,9 @@ export function episodeStats(entries: readonly SessionEntry[], cwd: string): Epi
         for (const thread of event.threads) {
           if (followed(index, thread.handle)) stats.cues.followed++;
         }
+      } else if (event.kind === 'nudge') {
+        stats.nudges.shown++;
+        if (foldedAfter(index, event.toolCallId)) stats.nudges.followed++;
       }
       return;
     }
@@ -438,6 +465,9 @@ export function statsLines(stats: EpisodeStats): string[] {
   if (cues.shown > 0) {
     const detail = parts([cues.readOnly, 'read-only'], [cues.capped, 'capped']);
     lines.push(`cues ${cues.shown}, followed ${cues.followed}${detail ? ` (${detail})` : ''}`);
+  }
+  if (stats.nudges.shown > 0) {
+    lines.push(`heavy-result nudges ${stats.nudges.shown}, folded after ${stats.nudges.followed}`);
   }
 
   const forks = stats.forks;

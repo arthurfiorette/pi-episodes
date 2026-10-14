@@ -25,7 +25,7 @@ Compaction summarizes the whole session at once, when the window fills. `pi-epis
 
 The terms, as in the post: an **episode** is one span of work around a local question. A **fold** replaces a finished episode with a short **note** plus a **handle** that points back to the archived span. A **fork** runs a copy of the agent with the parent's current context. **recall** searches the archive without a model call, and **ask** puts one question to an archived thread.
 
-**Requirements:** Node.js 22.19+ and pi 1.1+. [The post](https://arthur.place/subagents-forks-collapsing-context) · [Get started](#get-started) · [How it works](#how-it-works) · [Tools](#tools) · [Prompt caching](#prompt-caching) · [Limitations](#limitations) · [Measurements](MEASUREMENTS.md)
+**Requirements:** Node.js 22.19+ and pi 1.1+. [The post](https://arthur.place/subagents-forks-collapsing-context) · [Get started](#get-started) · [How it works](#how-it-works) · [Tools](#tools) · [Prompt caching](#prompt-caching) · [Limitations](#limitations) · [Measurements](MEASUREMENTS.md) · [Observations](OBSERVATIONS.md)
 
 <br />
 
@@ -95,6 +95,18 @@ Two cues help the agent go back when it does not know it should:
 - **File touch:** when `read`, `edit` or `write` touches a file that a folded span or fork changed or used, the result names the thread, at most the two newest ones, once for each thread and file. It fires on edits after the change is made, and not at all for files touched through the shell; spans that only read a file trigger it too.
 - **Staleness:** `recall` and `ask` start their result with the files a thread relied on that have changed since it was archived.
 
+One cue helps it fold. The prompt's test for an episode boundary is abstract and sits far back in the context, and in benchmark runs the model never applied it at the moment a boundary passed: the spans that cost most were single tool results, an unbounded `grep -R` or a whole test suite, that stayed in context for thirty requests. So when a tool result is over about 8k tokens, the harness ends it with one line:
+
+```text
+[episodes] This result is ~12k tokens. Fold the span it belongs to once you have taken what you need from it.
+```
+
+It is read at the moment the model is about to use the result, it costs nothing until it fires, and it names no stamp: the one benchmark fold that was given a start folded reads it still needed, so the span is left to the model. Like the file-touch cue it is written once with the result, so it does not disturb the prompt cache. `/episodes stats` counts how often it fired and how often a fold covering that result followed. Turn it off or change the threshold in pi's `settings.json`:
+
+```json
+{ "episodes": { "heavyResultNudge": false, "heavyResultTokens": 8000 } }
+```
+
 `fork` is meant for long work that continues the agent's own, such as making the build pass. Inside, the fork folds its own finished episodes the same way, so a long build loop does not stay in its context either; its result lists those folds, and the archive becomes a tree: the fork's thread holds what it saw at the end, and each fold inside it is a thread of its own. It is deliberately not a reviewer: a review is useful because it does not share the author's assumptions. The other half of the post, a separate agent consulted on purpose and handed the user's requests without the agent's reasoning, is not built here; the prompt only tells the model how to brief one if it has such a tool.
 
 While a fork runs, a widget above the editor shows its turn, elapsed time and current tool. `ctrl+shift+e` or `/forks` opens an overlay with the forks started in this pi process, running or finished, and the child's transcript as it grows: tab switches fork, arrows scroll, esc closes. After a restart, `/episodes`, `recall` and `ask` still reach earlier forks; the overlay does not.
@@ -139,13 +151,14 @@ context ~41k folded, ~380k fewer tokens sent since, compactions 0
 cache missed after fold avg ~24k, anchor placed 2/2, anchor to span start avg ~3k
 recall 3 (1 empty), ask 1, stale 1 (re-read 1)
 cues 2, followed 1 (1 read-only)
+heavy-result nudges 3, folded after 1
 forks 1, 6 turns, $0.12
 added by the extension ~2k (stamps ~1k, cues ~0, reminders and notices ~1k), prompt ~1k per request
 ```
 
-Token counts are estimates (about four characters a token), except the request sizes and the cache miss after each fold (input plus cache write, so it compares across providers that do and do not report cache writes), which come from the provider's usage. The anchor lines only appear with providers that take cache breakpoints, such as Anthropic. "Fewer tokens sent" counts each fold's span minus its note on every later request, until a compaction. A cue is followed when a `recall` matching that thread, or an `ask` of it, comes within the next three responses.
+Token counts are estimates (about four characters a token), except the request sizes and the cache miss after each fold (input plus cache write, so it compares across providers that do and do not report cache writes), which come from the provider's usage. The anchor lines only appear with providers that take cache breakpoints, such as Anthropic. "Fewer tokens sent" counts each fold's span minus its note on every later request, until a compaction. A cue is followed when a `recall` matching that thread, or an `ask` of it, comes within the next three responses; a heavy-result nudge is folded after when a fold whose span holds that result comes within the same window.
 
-The numbers are read from the session entries alone, so older and resumed sessions show them too. Most come from the records already on the tool results; what has no record of its own is written as `episodes-event` entries (fold errors with their cause, and each file-touch cue), and an `episodes-meta` entry at session start records the version, a hash of the prompt and tool descriptions, pi's version and the settings. Pi never sends these entries to the model. Scripts outside pi can compute the same numbers from a session file:
+The numbers are read from the session entries alone, so older and resumed sessions show them too. Most come from the records already on the tool results; what has no record of its own is written as `episodes-event` entries (fold errors with their cause, each file-touch cue and each heavy-result nudge), and an `episodes-meta` entry at session start records the version, a hash of the prompt and tool descriptions, pi's version and the settings. Pi never sends these entries to the model. Scripts outside pi can compute the same numbers from a session file:
 
 ```ts
 import { episodeStats, statsLines } from 'pi-episodes/stats';
@@ -172,7 +185,7 @@ To measure what the cache anchor saves, turn it off with `{ "episodes": { "cache
 
 ## Limitations
 
-- Prompting is the only way the model learns the habit; there is no training behind it. Expect folds to be late, early or missing caveats until the prompt is tuned against real sessions. [MEASUREMENTS.md](MEASUREMENTS.md) lists what to measure, in order.
+- Prompting is the only way the model learns the habit; there is no training behind it. Expect folds to be late, early or missing caveats until the prompt is tuned against real sessions. [MEASUREMENTS.md](MEASUREMENTS.md) lists what to measure, in order, and [OBSERVATIONS.md](OBSERVATIONS.md) logs what the sessions and benchmarks so far showed and what changed because of it.
 - A snapshot (`git add -A` and `git write-tree` against the private index) runs in the background for every stamped message, and the next tool call waits for it. Unchanged files are not hashed again, but large untracked files are, every time they change.
 - `git add -A` runs the repository's clean filters, so with Git LFS it writes into `.git/lfs/objects` and can be slow on large files. Changes inside submodules show only as the submodule having changed.
 - Snapshots only live as long as the session. After a restart, a fold that reaches back past it lists the files that `read`, `edit` and `write` touched instead of a diff, and older threads get no staleness notes. Outside a git repository that is always the case.

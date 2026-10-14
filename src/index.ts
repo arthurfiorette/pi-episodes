@@ -1,6 +1,10 @@
 import { relative, resolve } from 'node:path';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { threadRecords } from './archive.js';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ToolResultEvent
+} from '@earendil-works/pi-coding-agent';
+import { FOLD_TOOL, threadRecords } from './archive.js';
 import { registerAsk } from './ask.js';
 import { cacheAnchor, placeAnchor } from './cache.js';
 import { registerCompactionNotice } from './compaction.js';
@@ -16,7 +20,7 @@ import { registerReminder } from './reminder.js';
 import { episodesSettings } from './settings.js';
 import { unstampedText, withStamp } from './stamps.js';
 import { EpisodeState } from './state.js';
-import { refreshStatus } from './ui.js';
+import { formatTokens, refreshStatus } from './ui.js';
 
 const STALE_STAMP = /\s*\[t\d+\]\s*$/;
 const MAX_SURFACED_THREADS = 2;
@@ -95,11 +99,11 @@ export default function episodes(pi: ExtensionAPI): void {
   });
 
   // The cue for a folded thread is attached to the tool result that touches one of its
-  // files again, so it is written once with that result instead of edited in later.
-  pi.on('tool_result', (event, ctx) => {
-    if (event.parentToolCallId || !FILE_TOOLS.has(event.toolName)) return undefined;
+  // files again.
+  const fileCue = (event: ToolResultEvent, ctx: ExtensionContext): string[] => {
+    if (!FILE_TOOLS.has(event.toolName)) return [];
     const path = event.input.path;
-    if (typeof path !== 'string' || !path) return undefined;
+    if (typeof path !== 'string' || !path) return [];
 
     const absolute = resolve(state.cwd, path);
     const matched = threadRecords(ctx.sessionManager.getBranch()).filter(
@@ -111,7 +115,7 @@ export default function episodes(pi: ExtensionAPI): void {
     // A cue that points at many threads primes none of them; the newest ones are the likely
     // ones, and the rest stay one recall away.
     const records = matched.slice(-MAX_SURFACED_THREADS);
-    if (records.length === 0) return undefined;
+    if (records.length === 0) return [];
 
     const shown = relative(state.cwd, absolute);
     recordEvent(pi, {
@@ -124,7 +128,7 @@ export default function episodes(pi: ExtensionAPI): void {
       })),
       matched: matched.length
     });
-    const lines = records.map((record) => {
+    return records.map((record) => {
       state.surfaced.add(`${record.handle}:${absolute}`);
       const kind = { fold: 'folded span', fork: 'fork', compaction: 'compacted turns' }[
         record.kind
@@ -135,6 +139,32 @@ export default function episodes(pi: ExtensionAPI): void {
           : `recall, or ask("${record.handle}", "<question>")`;
       return `[episodes] ${shown} was also touched in ${kind} ${record.handle} (${record.headline}). If what happened there matters now: ${back}.`;
     });
+  };
+
+  // The prompt's boundary test is abstract and far back; a result this big is the concrete
+  // thing to fold, read at the moment the model is about to use it. It names no stamp: the
+  // one benchmark fold that was given a start folded reads still needed.
+  const heavyResultNudge = (event: ToolResultEvent): string[] => {
+    const settings = episodesSettings(pi.getSettings());
+    if (!settings.heavyResultNudge || event.toolName === FOLD_TOOL) return [];
+    const chars = event.content.reduce(
+      (sum, block) => sum + (block.type === 'text' ? block.text.length : 0),
+      0
+    );
+    const tokens = Math.ceil(chars / 4);
+    if (tokens < settings.heavyResultTokens) return [];
+    recordEvent(pi, { kind: 'nudge', toolCallId: event.toolCallId, tokens });
+    return [
+      `[episodes] This result is ~${formatTokens(tokens)} tokens. Fold the span it belongs to once you have taken what you need from it.`
+    ];
+  };
+
+  // Lines for the model are attached to the tool result as it is saved, never edited in
+  // later. Both read as "[episodes] ..." so the stats count them as overhead.
+  pi.on('tool_result', (event, ctx) => {
+    if (event.parentToolCallId) return undefined;
+    const lines = [...fileCue(event, ctx), ...heavyResultNudge(event)];
+    if (lines.length === 0) return undefined;
     const content = [...event.content, { type: 'text' as const, text: lines.join('\n') }];
     // Replacing content alone would drop structured output for programmatic callers.
     return event.structuredContent === undefined

@@ -18,35 +18,41 @@
  * tool descriptions in fold.ts, recall.ts, ask.ts and fork.ts say how to call each tool and
  * what it costs. Do not restate one in the other. Rules the harness enforces with a
  * corrective error can stay out of the prompt unless a failed call costs more than the
- * sentence. Any wording change changes behavior and the prompt hash in episodes-meta, so
- * rerun bench/ before and after and compare the /episodes stats numbers.
+ * sentence. Cues that belong to a moment (a heavy tool result, a file touched again) are
+ * written on that tool result in index.ts, not here. Any wording change changes behavior and
+ * the prompt hash in episodes-meta, so rerun bench/ before and after and compare the
+ * /episodes stats numbers.
  */
 export const EPISODES_SECTION = /* md */ `
 
 Every user message and tool result ends with a turn stamp such as [t12], added by the
 harness. Never write stamps yourself.
 
-Work in episodes and fold each one when it ends. An episode is the span of turns spent on
-one subgoal, a local question such as "why does the build fail?". A fold replaces the span
-with a note you write and archives the span, where recall and ask still reach it, so
-nothing is lost. A finished episode left in context is re-read on every later turn, with
-its logs, dead ends and rejected guesses; once folded, later turns carry only what the
-work still needs. Fold finished episodes as you go; do not wait for the context to fill.
+Fold each episode when it ends. An episode is the span of turns spent on one subgoal, a
+local question such as "why does the build fail?". A fold replaces the span with a note
+you write and archives the span, where recall and ask still reach it. The span includes
+your own reasoning and tool-call arguments, usually its largest part; after a fold they are
+gone unless the note holds what they decided. A finished episode left in context is
+re-read on every later turn, with its logs, dead ends and rejected guesses; once folded,
+later turns carry only what the work still needs. Fold finished episodes as you go; do not
+wait for the context to fill.
 
 An episode ends when the question is answered or parked and the next step could proceed
-from the context before the span plus the note. A user message that changes the subject
-ends it too, unless it is a brief aside. When the question drifts instead, as in
-open-ended exploration, there is no boundary yet. One request usually holds several
-episodes: a research detour, a debugging loop, a round of probes. Once the code an
-exploration led to is written, the exploration has ended; the decisions are in the files.
+from the context before the span plus the note. The usual moments: a search or test run
+whose output you have finished reading; a diagnosis done and editing about to start; tests
+green after a fix loop. A user message that changes the subject ends it too, unless it is
+a brief aside. One request usually holds several episodes: a research detour, a debugging
+loop, a round of probes. A search or test run is finished once you have its answer, even
+mid-exploration; what stays open is the question you are still forming, not the output you
+have already read. The reads and searches that led to an edit are finished once the edit
+is made; the decisions are in the files.
 
 To fold, set since to the stamp of the first message inside the span: if your response
 after [t12] started the episode and its first tool result is [t13], since is "t13". The
 span from there up to the fold leaves your context; user messages from it stay, with their
 stamps. Start after reads you still need verbatim, such as a file you are about to edit.
-The span includes your own reasoning and tool-call arguments, often its largest part, so
-judge its size by those too; only a few short calls with little reasoning, under roughly
-2k tokens, are not worth a fold. A fold cannot reach back past the latest note or a
+Only a few short calls with little reasoning, under roughly 2k tokens, are not worth a
+fold. A fold cannot reach back past the latest note or a
 compaction summary, and stamps a summary mentions are gone: since must be a stamp you see
 at the end of a message. Do not fold right before your final reply, which needs the span;
 fold that last episode at the start of the next request instead. Call fold alone in its

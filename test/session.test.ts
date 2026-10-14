@@ -43,7 +43,12 @@ function conversation(context: TranscriptContext): Message[] {
 
 async function createSession(
   steps: Step[],
-  options: { git?: boolean; persist?: boolean; keepRecentTokens?: number } = {}
+  options: {
+    git?: boolean;
+    persist?: boolean;
+    keepRecentTokens?: number;
+    episodes?: Record<string, unknown>;
+  } = {}
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'pi-episodes-session-'));
   if (options.git) execFileSync('git', ['init', '-q'], { cwd: dir });
@@ -88,8 +93,9 @@ async function createSession(
         ...(options.keepRecentTokens === undefined
           ? {}
           : { keepRecentTokens: options.keepRecentTokens })
-      }
-    })
+      },
+      ...(options.episodes ? { episodes: options.episodes } : {})
+    } as Parameters<typeof SettingsManager.inMemory>[0])
   });
   await session.bindExtensions({});
 
@@ -559,6 +565,91 @@ test('a fork folds its own work, and recall and ask reach the fold inside it', a
     assert.equal(harness.pending(), 0);
   } finally {
     await harness.cleanup();
+  }
+});
+
+const HEAVY = 'yes 0123456789012345678901234567890123456789 | head -1000';
+
+test('a heavy tool result carries a fold nudge, counted as followed by a fold covering it', async () => {
+  const harness = await createSession([
+    // 1000 lines of 40 characters: about 41k characters, past the 8k-token default and
+    // inside pi's 2000-line, 50KB truncation.
+    () => fauxAssistantMessage(fauxToolCall('bash', { command: HEAVY })),
+    (context) => {
+      const result = text(conversation(context).at(-1)!);
+      assert.match(result, /\[episodes\] This result is ~10k tokens\. Fold the span/);
+      return fauxAssistantMessage(fauxToolCall('bash', { command: 'echo small' }));
+    },
+    (context) => {
+      assert.doesNotMatch(text(conversation(context).at(-1)!), /\[episodes\]/);
+      return fauxAssistantMessage(fauxToolCall('fold', { since: 't1', note: 'Counted to 8000.' }));
+    },
+    () => fauxAssistantMessage('done')
+  ]);
+
+  try {
+    await harness.session.prompt('go');
+    if (harness.failures[0]) throw harness.failures[0];
+    assert.equal(harness.pending(), 0);
+
+    const branch = harness.session.sessionManager.getBranch();
+    const events = branch.flatMap((entry) =>
+      entry.type === 'custom' && entry.customType === EVENT_TYPE ? [entry.data] : []
+    );
+    assert.equal(events.length, 1);
+    assert.equal((events[0] as { kind: string }).kind, 'nudge');
+    assert.ok((events[0] as { tokens: number }).tokens >= 8000);
+
+    const stats = episodeStats(branch, harness.dir);
+    assert.deepEqual(stats.nudges, { shown: 1, followed: 1 });
+    assert.ok(stats.overhead.cues > 0);
+    assert.ok(statsLines(stats).includes('heavy-result nudges 1, folded after 1'));
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('the heavy-result nudge can be turned off and its threshold changed', async () => {
+  const off = await createSession(
+    [
+      () => fauxAssistantMessage(fauxToolCall('bash', { command: HEAVY })),
+      (context) => {
+        assert.doesNotMatch(text(conversation(context).at(-1)!), /\[episodes\]/);
+        return fauxAssistantMessage('done');
+      }
+    ],
+    { episodes: { heavyResultNudge: false } }
+  );
+  try {
+    await off.session.prompt('go');
+    if (off.failures[0]) throw off.failures[0];
+    const stats = episodeStats(off.session.sessionManager.getBranch(), off.dir);
+    assert.deepEqual(stats.nudges, { shown: 0, followed: 0 });
+  } finally {
+    await off.cleanup();
+  }
+
+  const low = await createSession(
+    [
+      () => fauxAssistantMessage(fauxToolCall('bash', { command: 'seq 1 300' })),
+      (context) => {
+        assert.match(
+          text(conversation(context).at(-1)!),
+          /\[episodes\] This result is ~\d{3} tokens/
+        );
+        return fauxAssistantMessage('done');
+      }
+    ],
+    { episodes: { heavyResultTokens: 100 } }
+  );
+  try {
+    await low.session.prompt('go');
+    if (low.failures[0]) throw low.failures[0];
+    const stats = episodeStats(low.session.sessionManager.getBranch(), low.dir);
+    // No fold followed; the final reply came right after.
+    assert.deepEqual(stats.nudges, { shown: 1, followed: 0 });
+  } finally {
+    await low.cleanup();
   }
 });
 
