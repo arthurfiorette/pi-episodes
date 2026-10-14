@@ -121,6 +121,8 @@ function childTool(
   return tool;
 }
 
+// Descriptions here cover only how to call the tool and what it costs; when to fork lives in
+// prompt.ts. Read its token budget comment before adding text to either.
 const ForkParams = Type.Object({
   task: Type.String({
     description:
@@ -133,7 +135,7 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
     name: FORK_TOOL,
     label: 'Fork',
     description:
-      'Run a copy of yourself on a long, self-contained task that continues your own work, such as making the build pass. The fork starts with your full current context, so there is no prompt to write, and every fork turn re-reads that context: do not fork short lookups. It runs to completion and returns its final note; its transcript is archived for recall and ask. Forks in the same response run in parallel and share your working tree, so give them parts that do not edit the same files. Not for reviews or second opinions, where independence matters.',
+      'Run a copy of yourself on a long, self-contained task that continues your own work, such as making the build pass. It starts with your full current context, so there is no prompt to write, and every fork turn re-reads that context: do not fork short lookups. It runs to completion and returns its final note; its transcript is archived for recall and ask. Forks in the same response run in parallel and share your working tree, so give them parts that do not edit the same files.',
     promptSnippet: 'Run a copy of yourself, with your context, on a self-contained task',
     parameters: ForkParams,
     renderCall: forkRenderers.renderCall,

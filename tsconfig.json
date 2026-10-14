@@ -12,5 +12,5 @@
     "types": ["node"],
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "bench/scripts"]
 }

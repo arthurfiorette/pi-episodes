@@ -113,6 +113,8 @@ export async function staleness(
   return notes;
 }
 
+// Descriptions here cover only how to call the tool and what it costs; when to recall lives in
+// prompt.ts. Read its token budget comment before adding text to either.
 const RecallParams = Type.Object({
   query: Type.String({
     description:
@@ -140,7 +142,7 @@ export function registerRecall(pi: ExtensionAPI, state: EpisodeState): void {
     name: 'recall',
     label: 'Recall',
     description:
-      'Search the archived threads (folded spans and finished forks): tool outputs, your own messages and reasoning, commands and their arguments. Ranked by relevance: messages holding every word come first, in any order, and rare words such as error codes weigh more than common ones. Returns the best line of each match with the thread handle and turn it came from; matches past the limit go to a file. A "quoted" query or regex matches exact text per line instead. Cheap, no model call. Query for the specific thing you need; it is not a way to read a span back.',
+      'Search the archived threads (folded spans, finished forks, compacted turns): tool outputs, your own messages and reasoning, tool arguments. Ranked; rare words such as error codes weigh most. A "quoted" query or regex matches exact text per line instead. Returns the best line of each match with its thread handle and turn; matches past the limit go to a file. No model call. Query for the specific thing you need; it is not a way to read a span back.',
     promptSnippet: 'Search archived threads (folded spans, forks) by keyword or exact text',
     parameters: RecallParams,
     renderCall: recallRenderers.renderCall,

@@ -25,7 +25,7 @@ Compaction summarizes the whole session at once, when the window fills. `pi-epis
 
 The terms, as in the post: an **episode** is one span of work around a local question. A **fold** replaces a finished episode with a short **note** plus a **handle** that points back to the archived span. A **fork** runs a copy of the agent with the parent's current context. **recall** searches the archive without a model call, and **ask** puts one question to an archived thread.
 
-**Requirements:** Node.js 24.16+ and pi 1.1+. [The post](https://arthur.place/subagents-forks-collapsing-context) · [Get started](#get-started) · [How it works](#how-it-works) · [Tools](#tools) · [Prompt caching](#prompt-caching) · [Limitations](#limitations) · [Measurements](MEASUREMENTS.md)
+**Requirements:** Node.js 22.19+ and pi 1.1+. [The post](https://arthur.place/subagents-forks-collapsing-context) · [Get started](#get-started) · [How it works](#how-it-works) · [Tools](#tools) · [Prompt caching](#prompt-caching) · [Limitations](#limitations) · [Measurements](MEASUREMENTS.md)
 
 <br />
 
@@ -197,7 +197,7 @@ Several details of `fork` were taken from [pi-subagents](https://github.com/nico
 
 ## Contributing
 
-1. Use Node.js 24.16+ and pnpm 12, then install dependencies with `pnpm install`.
+1. Use Node.js 22.19+ (`.nvmrc` has 24) and pnpm 12, then install dependencies with `pnpm install`.
 2. Run `pnpm test-types`, `pnpm test` and `pnpm lint-ci`. The session tests run the extension inside a real pi session against pi's faux provider, so no API key is needed.
 3. Run `pnpm build` and load the result with `pi -e .` to try it by hand.
 

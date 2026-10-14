@@ -6,6 +6,9 @@ importers:
   .:
     configDependencies: {}
     packageManagerDependencies:
+      '@pnpm/exe':
+        specifier: 12.11.2
+        version: 12.11.2
       pnpm:
         specifier: 12.11.2
         version: 12.11.2
@@ -89,6 +92,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@pnpm/exe@12.11.2':
+    resolution: {integrity: sha512-uUudrvXShgp6yYRL/6XjeB2B2kbjE/alBdVWjFBP0jDiOnV5R83OpCWuGtc+Tn4stk0DEgO/x+vhEUTUf4x+Yw==}
+    engines: {node: '>=18.*'}
+    hasBin: true
+
   pnpm@12.11.2:
     resolution: {integrity: sha512-JaUWUqGWeFr18ovabf6NxYLr76SsHRgCIc4TkCMcX7dmN4IupLbkYzznSs3LCnf3Ja8RutOBd/3t2u6BipVcuQ==}
     engines: {node: '>=18.*'}
@@ -137,6 +145,23 @@ snapshots:
 
   '@pnpm/exe.win32-x64@12.11.2':
     optional: true
+
+  '@pnpm/exe@12.11.2':
+    optionalDependencies:
+      '@pnpm/exe.android-arm64': 12.11.2
+      '@pnpm/exe.android-x64': 12.11.2
+      '@pnpm/exe.darwin-arm64': 12.11.2
+      '@pnpm/exe.darwin-x64': 12.11.2
+      '@pnpm/exe.freebsd-x64': 12.11.2
+      '@pnpm/exe.linux-arm64': 12.11.2
+      '@pnpm/exe.linux-arm64-musl': 12.11.2
+      '@pnpm/exe.linux-ppc64': 12.11.2
+      '@pnpm/exe.linux-riscv64': 12.11.2
+      '@pnpm/exe.linux-s390x': 12.11.2
+      '@pnpm/exe.linux-x64': 12.11.2
+      '@pnpm/exe.linux-x64-musl': 12.11.2
+      '@pnpm/exe.win32-arm64': 12.11.2
+      '@pnpm/exe.win32-x64': 12.11.2
 
   pnpm@12.11.2:
     optionalDependencies:
@@ -200,6 +225,9 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
 packages:
 
@@ -1058,6 +1086,11 @@ packages:
     engines: {node: '>= 14.6'}
     hasBin: true
 
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
 snapshots:
 
   '@anthropic-ai/sdk@0.129.0':
@@ -1904,3 +1937,5 @@ snapshots:
   ws@8.22.0: {}
 
   yaml@2.9.0: {}
+
+  yaml@2.9.1: {}

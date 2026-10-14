@@ -403,14 +403,16 @@ export function renderNote(options: {
   return lines.join('\n');
 }
 
+// Descriptions here cover only how to call the tool; when to fold and the note format live in
+// prompt.ts. Read its token budget comment before adding text to either.
 const FoldParams = Type.Object({
   since: Type.String({
     description:
-      'Stamp of the first message inside the episode, such as "t13", usually the result of its first tool call. The fold starts at the response that made that call and runs up to this call.'
+      'Stamp of the first message inside the episode, such as "t13". If it is a tool result, the fold starts at the response that made that call.'
   }),
   note: Type.String({
     description:
-      'Replaces the span. First line: the question and how it ended. Then changed, learned (with conditions), decided and rejected (with why), handled user messages by stamp, open (with the next step). Quote exact paths, symbols, commands and error strings.'
+      'Replaces the span. First line: the question and how it ended. Then changed, learned, decided and rejected, handled, open, as the system prompt describes.'
   })
 });
 
@@ -419,7 +421,7 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
     name: FOLD_TOOL,
     label: 'Fold',
     description:
-      'Fold a finished episode: remove the span starting at `since` from your context, archive it, and keep `note` in its place. User messages from the span stay. Call it as the only tool in the response, once the next step no longer depends on the span beyond the note, and not right before your final reply.',
+      'Fold a finished episode: remove the span starting at `since` from your context, archive it, and keep `note` in its place. User messages from the span stay. recall and ask still reach the span.',
     promptSnippet: 'Fold a finished episode into a note; the span is archived and stays reachable',
     parameters: FoldParams,
     executionMode: 'sequential',

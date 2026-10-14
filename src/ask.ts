@@ -21,6 +21,8 @@ function question(text: string): AgentMessage {
   };
 }
 
+// Descriptions here cover only how to call the tool and what it costs; when to ask lives in
+// prompt.ts. Read its token budget comment before adding text to either.
 const AskParams = Type.Object({
   handle: Type.String({
     description: 'Archived thread to ask, such as "ep-1a2b3c4d" or "fk-1a2b3c4d".'
@@ -35,7 +37,7 @@ export function registerAsk(pi: ExtensionAPI, state: EpisodeState): void {
     name: 'ask',
     label: 'Ask',
     description:
-      'Ask an archived thread (folded span or finished fork) one question. The thread is resumed with everything it held, answers once without acting, and only the answer comes back. Use recall instead when searching for words or exact text will do.',
+      'Ask an archived thread (folded span or finished fork) one question. The thread is resumed with everything it held, answers once without acting, and only the answer comes back. It re-reads the whole thread, usually uncached.',
     promptSnippet: 'Ask an archived thread a question; it answers from its full context',
     parameters: AskParams,
     renderCall: askRenderers.renderCall,

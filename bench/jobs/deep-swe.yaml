@@ -1,0 +1,33 @@
+# DeepSWE v1.1 (datacurve/deep-swe-1-1): one long feature per task in a real open-source
+# repository, graded by hidden behavior tests in a separate verifier. 113 tasks: 34 Go,
+# 34 Python, 35 TypeScript, 5 JavaScript, 5 Rust. Agent budget is 90 minutes per task.
+#
+# Anything here can be overridden by bench/local.yaml, which is not committed.
+
+dataset:
+  name: datacurve/deep-swe-1-1
+  # ref: pin a version digest once a run is worth comparing against later ones
+
+# Matched against `language` in each task.toml. `tasks` (name globs) replaces this.
+languages: [go, python, typescript, javascript, rust]
+# Up to 8 tasks per language, the same ones on every run while the seed stays: 34 tasks.
+# Remove for all 113.
+sample:
+  perLanguage: 8
+  seed: 1
+
+# Attempts per task and arm. Three is the least that says anything about variance.
+attempts: 3
+
+models:
+  - anthropic/claude-sonnet-5-5
+thinking: high
+
+# pi inside the container, the same in both arms.
+pi: 1.1.0
+# pi-episodes in the episodes arm: `local` packs this checkout, or a pi package source
+# such as npm:pi-episodes@0.3.0.
+episodes: local
+
+concurrency: 2
+environment: docker

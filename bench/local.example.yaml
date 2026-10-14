@@ -1,0 +1,29 @@
+# Copy to bench/local.yaml (git-ignored). Keys here replace the same keys of the job file.
+# Secrets are best kept in bench/.env (also git-ignored) and referenced as ${VAR}.
+
+# models:
+#   - anthropic/claude-opus-5-5
+#   - openai/gpt-6-sol
+# thinking: high
+# concurrency: 4
+# environment: daytona
+
+# Extra pi packages, installed in both arms before the agent runs.
+# packages:
+#   - npm:pi-example-provider@1.0.0
+
+# The model's provider comes from one of those packages (see bench/README.md).
+# packageProvider: true
+
+# Environment variables for pi in both arms.
+# env:
+#   EXAMPLE_PROVIDER_URL: ${EXAMPLE_PROVIDER_URL}
+#   EXAMPLE_PROVIDER_API_KEY: ${EXAMPLE_PROVIDER_API_KEY}
+
+# Hosts pi may reach while tasks that block the network run, such as a model endpoint.
+# allowedHosts:
+#   - llm.example.com
+
+# Run only some tasks: name globs, replacing languages and sample.
+# tasks:
+#   - datacurve/arktype-json-schema-refs-dependencies
