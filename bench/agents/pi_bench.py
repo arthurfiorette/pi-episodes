@@ -102,7 +102,9 @@ class PiBench(Pi):
         try:
             result = subprocess.run(
                 [
-                    str(REPO / "node_modules/.bin/tsx"),
+                    "node",
+                    "--import",
+                    "tsx",
                     str(REPO / "bench/scripts/stats.ts"),
                     str(sessions[-1]),
                 ],

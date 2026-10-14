@@ -22,6 +22,8 @@ cp bench/.env.example bench/.env   # API keys; git-ignored
 
 `bench/.env` is read by Harbor on the host. A variable reaches the sandbox only if a config names it under `env`. Harbor forwards the key of the selected model's provider to the pi adapter automatically (`ANTHROPIC_API_KEY` for `anthropic/...`, and so on).
 
+On Windows, use Docker Desktop's Linux containers. In PowerShell, copy the environment template with `Copy-Item bench/.env.example bench/.env`. If `harbor --version` is not found after installation, run `uv tool update-shell` and restart the terminal. The host scripts handle Windows paths and package-manager shims; native Windows Harbor execution still needs a smoke test. WSL2 is the fallback if Harbor itself fails on Windows.
+
 ### Local settings
 
 `bench/local.yaml` (git-ignored) overrides any key of a job file: models, thinking level, concurrency, sandbox provider. Start from [`local.example.yaml`](local.example.yaml).

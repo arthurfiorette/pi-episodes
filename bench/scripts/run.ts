@@ -6,7 +6,7 @@
 // arms cannot drift apart by editing one of them.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join, matchesGlob, resolve } from 'node:path';
+import { basename, delimiter, join, matchesGlob, resolve } from 'node:path';
 import { parse } from 'yaml';
 
 const BENCH = resolve(import.meta.dirname, '..');
@@ -151,7 +151,7 @@ function prepull(images: readonly string[]): void {
       console.error(`pulling ${image} (${attempt})`);
       if (spawnSync('docker', ['pull', '--quiet', image], { stdio: 'inherit' }).status === 0) break;
       if (attempt === 5) throw new Error(`Could not pull ${image}`);
-      spawnSync('sleep', [String(attempt * 15)]);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 15_000);
     }
   }
 }
@@ -161,11 +161,20 @@ function episodesSource(episodes: string): string {
   if (episodes !== 'local') return episodes;
   const out = join(BENCH, '.out');
   mkdirSync(out, { recursive: true });
-  const packed = spawnSync('pnpm', ['pack', '--pack-destination', out], {
-    cwd: REPO,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit']
-  });
+  // pnpm's Windows .cmd shim cannot be spawned directly without a shell.
+  const entry = process.env.npm_execpath;
+  const native = entry?.endsWith('.exe');
+  const packed = spawnSync(
+    entry && native ? entry : entry ? process.execPath : 'pnpm',
+    [...(entry && !native ? [entry] : []), 'pack', '--pack-destination', out],
+    {
+      cwd: REPO,
+      shell: !entry && process.platform === 'win32',
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit']
+    }
+  );
+  if (packed.error) throw packed.error;
   if (packed.status !== 0) throw new Error('pnpm pack failed');
   const tarball = packed.stdout.trim().split('\n').at(-1)!;
   return resolve(out, basename(tarball));
@@ -299,7 +308,7 @@ function main(): number {
     {
       ...process.env,
       ...secrets,
-      PYTHONPATH: [join(BENCH, 'agents'), process.env.PYTHONPATH].filter(Boolean).join(':')
+      PYTHONPATH: [join(BENCH, 'agents'), process.env.PYTHONPATH].filter(Boolean).join(delimiter)
     }
   );
 }
