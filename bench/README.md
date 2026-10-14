@@ -6,6 +6,8 @@ Runs the same tasks with plain pi and with pi + pi-episodes, then compares pass 
 - **Tasks.** [DeepSWE](https://deepswe.datacurve.ai) v1.1 (`datacurve/deep-swe-1-1`): 113 long features in real open-source repositories, graded by hidden behavior tests in a separate verifier. Agent budget is 90 minutes per task. The default job samples up to 8 tasks per language (34 in all) with a fixed seed.
 - **Numbers.** Harbor records reward, tokens, cost and time per trial. After each trial, both arms read their pi session file with `episodeStats()` (the same code as `/episodes stats`) and attach the result to the trial's `result.json`. Plain pi sessions give requests, context per request and compactions; the episodes arm also gives folds, recalls, asks and forks.
 
+If you are an agent or a new maintainer about to change the benchmark or the prompt, read [GUIDE.md](GUIDE.md) first. It explains why the benchmark is built this way, how the upstream pieces work, the traps already hit, and how a prompt change is tested, and it links every source it relies on. What the runs showed so far is logged in [OBSERVATIONS.md](../OBSERVATIONS.md).
+
 <br />
 
 ## Setup
@@ -100,6 +102,7 @@ How to read them:
 
 | Path | What it is |
 | --- | --- |
+| `GUIDE.md` | Why the benchmark is built this way, how Harbor and DeepSWE work underneath, known traps, the prompt-tuning loop, references |
 | `jobs/*.yaml` | Job definitions: dataset, task selection, attempts, default models, pi version |
 | `local.example.yaml` | Template for the git-ignored `local.yaml` |
 | `agents/pi_bench.py` | The two Harbor agents (`PiBench`, `PiEpisodes`), subclasses of Harbor's pi adapter |
