@@ -24,6 +24,18 @@ cp bench/.env.example bench/.env   # API keys; git-ignored
 
 On Windows, use Docker Desktop's Linux containers. In PowerShell, copy the environment template with `Copy-Item bench/.env.example bench/.env`. If `harbor --version` is not found after installation, run `uv tool update-shell` and restart the terminal. The runner enables Python UTF-8 mode so Harbor can read agent logs regardless of the Windows code page. The host scripts handle Windows paths and package-manager shims; native Windows Harbor execution still needs a smoke test. WSL2 is the fallback if Harbor itself fails on Windows.
 
+At high concurrency, Docker's default subnet pools can run out before CPU or RAM does: Harbor creates a Compose network per environment, with additional networks for separate verifiers. If startup fails with `all predefined address pools have been fully subnetted`, configure smaller subnets in Docker Desktop's **Settings > Docker Engine**, merging this into the existing configuration:
+
+```json
+{
+  "default-address-pools": [
+    { "base": "10.240.0.0/16", "size": 24 }
+  ]
+}
+```
+
+This provides 256 `/24` networks. Choose a base that does not overlap your LAN, VPN, WSL, or other routed networks. Restart Docker to apply it; existing networks retain their old subnets. On Windows, the Linux-engine configuration is also stored in `%UserProfile%/.docker/daemon.json`. Verify the active setting with `docker info --format '{{json .DefaultAddressPools}}'`. Do not use a global network prune while other workloads are running.
+
 ### Local settings
 
 `bench/local.yaml` (git-ignored) overrides any key of a job file: models, thinking level, concurrency, sandbox provider. Start from [`local.example.yaml`](local.example.yaml).

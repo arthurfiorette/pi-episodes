@@ -92,6 +92,7 @@ Read [`src/harbor/agents/installed/pi.py`](https://github.com/harbor-framework/h
 | `CancelledError` in both arms, no reward | The job was interrupted (Ctrl-C) | Rerun; the report counts it as an error, not a result |
 | Very slow trials on a Mac | DeepSWE images are amd64, emulated on Apple Silicon | Compare timings only within one machine; run the real jobs on an amd64 host |
 | Verifier failures at high concurrency | Each task asks for 8 GB and verification starts a second container | Keep `concurrency × 8 GB` near the memory Docker has |
+| Docker startup fails with `all predefined address pools have been fully subnetted` | Compose allocates a network per environment; Docker's default subnet pools are too small for high concurrency | Configure a non-overlapping `default-address-pools` range split into `/24` networks, restart Docker, and remove only confirmed stale job networks; see README |
 
 <br />
 
