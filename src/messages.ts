@@ -52,17 +52,38 @@ export function estimateTokens(messages: readonly AgentMessage[]): number {
 }
 
 /** Absolute paths that file tools read or wrote in these messages. */
-export function touchedPaths(messages: readonly AgentMessage[], cwd: string): string[] {
+export function touchedPaths(
+  messages: readonly AgentMessage[],
+  cwd: string,
+  tools: ReadonlySet<string> = FILE_TOOLS
+): string[] {
   const paths = new Set<string>();
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
     for (const block of message.content) {
-      if (block.type !== 'toolCall' || !FILE_TOOLS.has(block.name)) continue;
+      if (block.type !== 'toolCall' || !tools.has(block.name)) continue;
       const path = block.arguments.path;
       if (typeof path === 'string' && path) paths.add(resolve(cwd, path));
     }
   }
   return [...paths];
+}
+
+const READ_TOOLS = new Set(['read']);
+const WRITE_TOOLS = new Set(['edit', 'write']);
+
+/**
+ * Files these messages only read: not edited or written by a file tool, and not in the
+ * working tree diff when there is one. A cue on such a file points at what was learned, not
+ * at what was changed.
+ */
+export function readOnlyPaths(
+  messages: readonly AgentMessage[],
+  cwd: string,
+  changed: readonly string[]
+): string[] {
+  const written = new Set([...touchedPaths(messages, cwd, WRITE_TOOLS), ...changed]);
+  return touchedPaths(messages, cwd, READ_TOOLS).filter((path) => !written.has(path));
 }
 
 export function textOf(content: readonly (TextContent | ImageContent)[]): string {

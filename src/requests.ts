@@ -2,6 +2,7 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { ModelsSimpleStreamOptions, Usage } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { anchorBreakpoint, cacheAnchor } from './cache.js';
+import { episodesSettings } from './settings.js';
 
 /**
  * Options for requests made outside pi's agent loop (ask, fork) that should look like the
@@ -16,13 +17,13 @@ export function requestOptions(
   signal: AbortSignal | undefined
 ): ModelsSimpleStreamOptions {
   const current = typeof messages === 'function' ? messages : () => messages;
-  const options: ModelsSimpleStreamOptions = {
-    sessionId: ctx.sessionManager.getSessionId(),
-    onPayload: (payload) => anchorBreakpoint(payload, cacheAnchor(current()))
-  };
+  const options: ModelsSimpleStreamOptions = { sessionId: ctx.sessionManager.getSessionId() };
+  const settings = pi.getSettings();
+  if (episodesSettings(settings).cacheAnchor) {
+    options.onPayload = (payload) => anchorBreakpoint(payload, cacheAnchor(current()));
+  }
   const level = ctx.thinkingLevel ?? pi.getThinkingLevel();
   if (level !== 'off') options.reasoning = level;
-  const settings = pi.getSettings();
   if (settings.thinkingBudgets) options.thinkingBudgets = settings.thinkingBudgets;
   // The main thread's provider-level retries and timeouts; pi's own run-level retry and
   // compaction do not exist outside its agent loop.

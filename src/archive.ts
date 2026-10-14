@@ -54,7 +54,24 @@ export interface FoldDetails {
   files: string[];
   /** Working tree at fold time, to tell later readers which of `files` changed since. */
   treeAfter?: string;
+  /** Files the span only read, not changed. */
+  readOnly?: string[];
+  /** Estimated tokens of the note that replaced the span. */
+  noteTokens?: number;
+  /**
+   * Set when the user asked for the fold with /fold: `since` when they picked where the span
+   * starts, `request` when the agent picked. Absent for folds the agent chose on its own.
+   */
+  manual?: 'since' | 'request';
+  /**
+   * The cache anchor on the request that called fold: whether it was placed (absent for
+   * providers without breakpoints), and the tokens between it and the span start, which the
+   * next request writes to the cache again. No gap when the anchor was inside the span.
+   */
+  anchor?: { placed?: boolean; gapTokens?: number };
 }
+
+export type ForkStatus = 'done' | 'failed' | 'timeout' | 'aborted';
 
 export interface ForkDetails {
   kind: 'fork';
@@ -74,6 +91,11 @@ export interface ForkDetails {
   archive?: string;
   /** The child's own model calls. */
   usage?: Usage;
+  /** Files the fork only read, not changed. */
+  readOnly?: string[];
+  status?: ForkStatus;
+  /** Folds the child made of its own work. */
+  folds?: number;
 }
 
 /**

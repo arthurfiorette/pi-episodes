@@ -27,8 +27,13 @@ export class EpisodeState {
   readonly surfaced = new Set<string>();
   /** Fork transcripts for sessions that have no file to write them next to. */
   readonly forkArchives = new Map<string, ForkArchive>();
-  /** Set by /fold so the requested fold ends the run instead of continuing the task. */
-  manualFold = false;
+  /**
+   * Set by /fold so the requested fold ends the run instead of continuing the task: `since`
+   * when the user picked where the span starts, `request` when the agent picks.
+   */
+  manualFold: 'since' | 'request' | undefined;
+  /** Whether the cache anchor was placed on the last main-thread request; unknown off Anthropic. */
+  anchorPlaced: boolean | undefined;
   /** Forks in progress, for the footer status. */
   runningForks = 0;
   /** Built on the first ranked recall; rebuilt per session rather than stored, it is derived. */
@@ -41,7 +46,8 @@ export class EpisodeState {
     this.pendingFolds.clear();
     this.surfaced.clear();
     this.forkArchives.clear();
-    this.manualFold = false;
+    this.manualFold = undefined;
+    this.anchorPlaced = undefined;
     this.runningForks = 0;
     this.recallIndex = undefined;
 

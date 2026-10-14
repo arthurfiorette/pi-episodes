@@ -78,11 +78,18 @@ async function spill(
   return file;
 }
 
+export interface Staleness {
+  handle: string;
+  /** Absolute paths the thread touched that changed since it was archived. */
+  files: string[];
+  line: string;
+}
+
 /** Which files an archived thread touched have changed since it was archived. */
 export async function staleness(
   state: EpisodeState,
   threads: readonly Thread[]
-): Promise<string[]> {
+): Promise<Staleness[]> {
   const snapshots = state.snapshots;
   const records = threads.flatMap((thread) =>
     thread.record.treeAfter && thread.record.files.length > 0 ? [thread.record] : []
@@ -92,13 +99,15 @@ export async function staleness(
   const now = await snapshots.snapshot();
   if (!now) return [];
 
-  const notes: string[] = [];
+  const notes: Staleness[] = [];
   for (const record of records) {
     const changed = await snapshots.diff(record.treeAfter!, now, record.files);
     if (changed && changed.length > 0) {
-      notes.push(
-        `${record.handle} predates changes to: ${changed.map((change) => relative(state.cwd, change.path)).join(', ')}. Conclusions about those files may no longer hold.`
-      );
+      notes.push({
+        handle: record.handle,
+        files: changed.map((change) => change.path),
+        line: `${record.handle} predates changes to: ${changed.map((change) => relative(state.cwd, change.path)).join(', ')}. Conclusions about those files may no longer hold.`
+      });
     }
   }
   return notes;
@@ -200,9 +209,14 @@ export function registerRecall(pi: ExtensionAPI, state: EpisodeState): void {
       const hitThreads = threads.filter((thread) =>
         matches.some((found) => found.handle === thread.handle)
       );
+      details.hits = hitThreads.map((thread) => thread.handle);
+      const stale = await staleness(state, hitThreads);
+      if (stale.length > 0) {
+        details.stale = stale.map(({ handle, files }) => ({ handle, files }));
+      }
       // Staleness goes first: a cue only works if it is seen before the matches are acted on.
       const lines = [
-        ...(await staleness(state, hitThreads)),
+        ...stale.map((note) => note.line),
         ...(partial ? ['No message holds every word of the query; these hold some of them.'] : []),
         ...matches.map(formatMatch)
       ];

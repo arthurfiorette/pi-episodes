@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchorBreakpoint, cacheAnchor } from '../src/cache.js';
+import { anchorBreakpoint, anchorGapTokens, cacheAnchor, placeAnchor } from '../src/cache.js';
+import { episodesSettings } from '../src/settings.js';
 import { assistant, call, result, user } from './helpers.js';
 
 const marker = { type: 'ephemeral' };
@@ -110,4 +111,32 @@ test('takes the TTL of the conversation breakpoint and matches rewritten tool id
 
   assert.equal(anchorBreakpoint(value, { toolUseId: 'call_1|fc_2' }), value);
   assert.equal((value.messages[2]!.content[0] as Record<string, unknown>).cache_control, tail);
+});
+
+test('reports whether the anchor holds a breakpoint, and nothing off Anthropic', () => {
+  assert.deepEqual(placeAnchor({ messages: [] }, { toolUseId: 'f1' }), {});
+  assert.equal(placeAnchor(payload(false), { toolUseId: 'f1' }).placed, true);
+  assert.deepEqual(placeAnchor(payload(false), undefined), { placed: false });
+  assert.deepEqual(placeAnchor(payload(false), { toolUseId: 'missing' }), { placed: false });
+  // Already a breakpoint there: placed, with nothing to change.
+  assert.deepEqual(placeAnchor(payload(false), { stamp: 'next' }), { placed: true });
+});
+
+test('the anchor gap is what lies between the anchor and the span start', () => {
+  const before = [
+    user('go', 1),
+    assistant(call('c1', 'bash')),
+    result('c1', 'bash', 'x'.repeat(400), 2)
+  ];
+  const sent = [...before, assistant(call('c2', 'bash')), result('c2', 'bash', 'out', 3)];
+  // Anchored on t1; everything after it up to the span start is written again.
+  assert.equal(anchorGapTokens(sent, before), 104);
+  // Anchored inside the span (a user message after the span start): no gap to report.
+  assert.equal(anchorGapTokens([...sent, user('more', 4)], before), undefined);
+  assert.equal(anchorGapTokens([], before), undefined);
+});
+
+test('the cache anchor can be turned off for measuring', () => {
+  assert.equal(episodesSettings({}).cacheAnchor, true);
+  assert.equal(episodesSettings({ episodes: { cacheAnchor: false } }).cacheAnchor, false);
 });

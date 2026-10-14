@@ -1,5 +1,5 @@
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
-import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
+import type { AssistantMessage, ImageContent, TextContent } from '@earendil-works/pi-ai';
 import {
   type ExtensionContext,
   getMarkdownTheme,
@@ -15,6 +15,7 @@ import {
 } from './archive.js';
 import { isStampBlock } from './stamps.js';
 import type { EpisodeState } from './state.js';
+import { episodeStats, sparkline } from './stats.js';
 
 export interface RecallDetails {
   query: string;
@@ -23,11 +24,22 @@ export interface RecallDetails {
   total: number;
   /** Where the matches past the limit were written. */
   file?: string;
+  /** Threads with a match among those shown. */
+  hits?: string[];
+  /** Shown threads whose files changed since they were archived. */
+  stale?: StaleThread[];
+}
+
+export interface StaleThread {
+  handle: string;
+  /** Absolute paths. */
+  files: string[];
 }
 
 export interface AskDetails {
   handle: string;
   question: string;
+  stale?: StaleThread[];
 }
 
 /** Result text without the trailing turn stamp, which resumed sessions render with. */
@@ -211,17 +223,53 @@ export const forkRenderers = {
   }
 };
 
-/** Footer status: what is archived on this branch, and whether a fork is running. */
-export function refreshStatus(ctx: ExtensionContext, state: EpisodeState): void {
-  const records = threadRecords(ctx.sessionManager.getBranch());
+const STATUS_BARS = 16;
+
+/**
+ * Footer status: context per request as a small graph, what is archived on this branch, and
+ * whether a fork is running. `pending` is a response that ended but is not saved yet.
+ */
+export function refreshStatus(
+  ctx: ExtensionContext,
+  state: EpisodeState,
+  pending?: AssistantMessage
+): void {
+  if (!ctx.hasUI) return;
+  const branch = ctx.sessionManager.getBranch();
+  const records = threadRecords(branch);
   const folds = records.filter(isFoldDetails);
   const forks = records.filter(isForkDetails);
   const archived = folds.reduce((sum, fold) => sum + fold.tokens, 0);
 
+  const points = episodeStats(branch, state.cwd).requests;
+  const usage = pending?.usage;
+  const tokens = usage ? usage.input + usage.cacheRead + usage.cacheWrite : 0;
+  if (tokens > 0) points.push({ tokens });
+
+  // Dim like pi's own footer lines. Each piece is colored on its own: a colored bar ends with
+  // a reset, which would clear a dim wrapped around the whole line.
+  const theme = ctx.ui.theme;
+  const dim = (text: string) => theme.fg('dim', text);
   const parts: string[] = [];
-  if (folds.length > 0)
-    parts.push(`${folds.length} folded, ~${formatTokens(archived)} tokens archived`);
-  if (forks.length > 0) parts.push(`${forks.length} fork(s)`);
-  if (state.runningForks > 0) parts.push(`forking (${state.runningForks})`);
-  ctx.ui.setStatus('episodes', parts.length > 0 ? `episodes: ${parts.join(', ')}` : undefined);
+  if (points.length > 1) {
+    // Drops after a fold are the point of the graph; those after a compaction are pi's.
+    parts.push(
+      sparkline(points, STATUS_BARS, (bar, point) =>
+        point.after === 'fold'
+          ? theme.fg('success', bar)
+          : point.after === 'compaction'
+            ? theme.fg('warning', bar)
+            : dim(bar)
+      )
+    );
+  }
+  const counts: string[] = [];
+  if (folds.length > 0) counts.push(`${folds.length} folded (~${formatTokens(archived)})`);
+  if (forks.length > 0) counts.push(`${forks.length} fork(s)`);
+  if (state.runningForks > 0) counts.push(`forking (${state.runningForks})`);
+  if (counts.length > 0) parts.push(dim(counts.join(', ')));
+  ctx.ui.setStatus(
+    'episodes',
+    parts.length > 0 ? `${dim('episodes')} ${parts.join(dim(' '))}` : undefined
+  );
 }

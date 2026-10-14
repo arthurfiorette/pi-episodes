@@ -14,12 +14,13 @@ import {
   FORK_TOOL,
   type ForkArchive,
   type ForkDetails,
+  type ForkStatus,
   writeForkArchive
 } from './archive.js';
 import { changeLines, headline, openItems } from './fold.js';
 import { ForkFolds } from './fork-fold.js';
 import type { ForkRegistry, LiveFork } from './forks-view.js';
-import { textOf, touchedPaths } from './messages.js';
+import { readOnlyPaths, textOf, touchedPaths } from './messages.js';
 import { addUsage, emptyUsage, requestOptions } from './requests.js';
 import { episodesSettings } from './settings.js';
 import type { DiskChange } from './snapshots.js';
@@ -329,6 +330,14 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
 
       const errored = final?.role === 'assistant' && final.stopReason === 'error';
       const failed = errored || stopped !== undefined;
+      const forkStatus: ForkStatus =
+        stopped === 'user'
+          ? 'aborted'
+          : stopped === 'timeout'
+            ? 'timeout'
+            : errored
+              ? 'failed'
+              : 'done';
       live.status = stopped === 'user' ? 'aborted' : failed ? 'failed' : 'done';
       registry.changed();
       const note =
@@ -343,8 +352,16 @@ export function registerFork(pi: ExtensionAPI, state: EpisodeState, registry: Fo
         turns,
         headline: headline(note),
         files: [...files],
-        usage
+        usage,
+        status: forkStatus
       };
+      if (folds.folds.length > 0) details.folds = folds.folds.length;
+      const readOnly = readOnlyPaths(
+        messages,
+        state.cwd,
+        (changes ?? []).map((change) => change.path)
+      );
+      if (readOnly.length > 0) details.readOnly = readOnly;
       if (file) details.archive = file;
       if (treeAfter) details.treeAfter = treeAfter;
       const open = openItems(note);

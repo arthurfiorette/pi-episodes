@@ -4,7 +4,9 @@ What to measure before believing that folding beats compaction, and how. Nothing
 
 The order follows the post: try the note before asking the model to notice anything. `/fold` separates the two questions, so note quality comes before boundary detection. Cheap scripted checks come first, so a broken mechanism is not mistaken for a bad model.
 
-Most of these need nothing but session files. Every session pi writes is a JSONL file with the full transcript; `pi-episodes` adds turn stamps, fold and fork records (on the tool results, with handle, stamp range, token counts, open items and files), the `context_edit` entries that hide spans, and the open-items reminders. A short script over those files gives most numbers below. The ones that need a human are marked.
+Most of these need nothing but session files. Every session pi writes is a JSONL file with the full transcript; `pi-episodes` adds turn stamps, fold and fork records (on the tool results, with handle, stamp range, token counts, open items and files), the `context_edit` entries that hide spans, the open-items reminders, `episodes-event` entries for fold errors and file-touch cues, and an `episodes-meta` entry with the version, prompt hash and settings. The ones that need a human are marked.
+
+`/episodes stats` computes many numbers below for the current branch, and `episodeStats()` from `pi-episodes/stats` computes the same ones from a parsed session file. Each section says what it covers; the rest needs a script or a person. Compare sessions only when their `episodes-meta` matches.
 
 Runs vary a lot between attempts. Unless a section says otherwise, run each condition at least 3 times per task and report the spread, not only the mean.
 
@@ -24,6 +26,8 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 - Folds of spans under 2k tokens (the prompt's threshold).
 - Notes with no first line naming a question and an outcome, and notes missing an Open section where work was left.
 
+**From the stats.** Rejections (causes are in the `fold-rejected` events) and whether the next fold succeeded, folds not alone, folds right before a final reply, spans under 2k, note and span tokens. Checking notes against the template needs a person.
+
 **Pass.** Rejections rare and recovered on the first retry; no fold right before a final reply.
 
 <br />
@@ -34,13 +38,15 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 
 **Why.** They are reasoning about provider behavior, not measured. Cheap to check.
 
-**Method.** Script over session files. Same long episode, 15+ turns, then a fold. Run on Anthropic with an API key and with OAuth, each with the anchor breakpoint on (default) and off (handler disabled).
+**Method.** Script over session files. Same long episode, 15+ turns, then a fold. Run on Anthropic with an API key and with OAuth, each with the anchor breakpoint on (default) and off (`{ "episodes": { "cacheAnchor": false } }`).
 
 **Report.**
 - `cacheWrite` on the request after the fold, both conditions, next to `cacheRead` on ordinary requests before it. With OAuth, `cacheRead` on ordinary requests must not drop when the identity block loses its breakpoint.
 - For each fold, the tokens between the anchor and `since`: the extra write a fold pays when one user request holds several episodes.
 - Fork child turns: `cacheRead` close to the parent prefix size on every turn after the first.
 - `ask` within the cache lifetime of its thread: `cacheRead` close to the thread size.
+
+**From the stats.** Uncached input (input plus cache write) on the request after each fold, whether the anchor was placed on the request that called fold, and the tokens between the anchor and the span start. Fork and ask cache reads are in the usage on their results (forks as a sum; per turn in the fork's transcript file).
 
 **Pass.** Smaller write after a fold with the anchor; equal reads elsewhere; forks and warm asks read the prefix from cache.
 
@@ -83,6 +89,8 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 **Method.** Script plus a short human pass. Find spans where a temporary change was made (a `console.log`, a skipped test, a pinned dependency, a `.only`). Check whether the note lists its reversal under Open and whether it was reversed before the session ended. Run with `episodes.openReminder` on and off, and on the same tasks with pi's compaction instead of folds.
 
 **Report.** Listed and reversed, listed and not reversed, not listed and reversed anyway, forgotten; per condition.
+
+**From the stats.** Reminders sent and their tokens. Whether an item was reversed needs a person.
 
 **Pass.** "Forgotten" near zero with the reminder on, and lower than with compaction.
 
@@ -133,7 +141,7 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 
 1. Find every trigger after a fold: an edit to a file in a fold's file list, a tool output containing an error string from an archived span, a command an archived span already ran, a rejected approach being tried again.
 2. Check whether a `recall` or `ask` with a matching query came within the next three turns.
-3. Count re-derivation: reads and commands that repeat an archived span's work with no recall before them.
+3. Count re-derivation by reading transcripts: work an archived span already did (the same investigation, a rejected fix tried again) redone with no recall before it. Exact repeats of commands are not a useful proxy: re-running a cheap command is often right, and recall would return stale output.
 4. List every `recall` and `ask` that no trigger preceded.
 
 **Report.**
@@ -142,6 +150,8 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 - Re-derivation count, per fold.
 - Spurious rate: recalls and asks with no trigger, and how many returned nothing.
 - File-touch cue: followed by a recall or ask on that handle, or ignored. The cue is capped at two threads per file; the ignored rate at caps of one, two and five threads shows whether the cap is right. Separately for spans that only read the file.
+
+**From the stats.** Cues shown, followed within three responses (a `recall` that matched the thread or an `ask` of it), read-only and capped; empty recalls; recalls that hit compacted turns. Hit rate on the other triggers and spurious recalls need a script; re-derivation needs a person.
 
 **Pass.** Hit rate well above a control run without the triggers in the prompt; re-derivation lower than with compaction. Spurious asks rare, since each is a model call.
 
@@ -154,6 +164,8 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 **Method.** Script. Every `recall` and `ask` result records whether a staleness line was added. For each one, check whether the agent re-read the file before acting on the thread's answer.
 
 **Report.** Staleness lines shown and followed by a re-read; shown and ignored; conclusions acted on from a stale thread that turned out wrong (human judged).
+
+**From the stats.** Staleness lines shown, and those followed by a `read` of a changed file within three responses.
 
 <br />
 
@@ -171,6 +183,9 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 - Tokens spent by `ask`, `fork` and compaction summaries.
 - Number of folds, median span size, share of folds under 2k tokens.
 - Task passed or not; turns to finish; corrections the user had to make.
+- What the extension itself adds: stamps, cues, reminders and notices, and its prompt section on every request. Without it the comparison with no extension is not fair.
+
+**From the stats.** Context per request, tokens folded and the estimate of tokens not sent since, compactions, fork turns and cost, and the extension's own additions. Outcome and corrections need a person or a test suite.
 
 **Pass.** Lower summed context per task at an equal or better pass rate.
 
@@ -189,6 +204,22 @@ Runs vary a lot between attempts. Unless a section says otherwise, run each cond
 - Clarifications: times the clean subagent had to ask back or re-derive something the parent knew.
 
 **Pass.** Fewer re-reads and clarifications than the clean subagent, with no rise in anchoring on seeded wrong guesses.
+
+<br />
+
+## 11. Folds inside forks
+
+**Question.** Does a fork that folds its own finished episodes stay smaller and finish as well as one that does not?
+
+**Why.** A fork has no compaction of its own and starts as large as its parent; folding is its only way to shed a long build loop.
+
+**Method.** Same delegated task, long enough for the child to have at least one finished episode, run several times. The child decides whether to fold, so compare the runs where it folded with those where it did not. Script over the fork transcripts, which hold each child response's usage, the folds made and the folds refused.
+
+**Report.** Child context per turn and its peak; folds made inside; folds refused for reaching behind the fork's start; turns to finish; whether the final note still mentions what was folded inside.
+
+**From the stats.** Folds made inside forks, and fork turns and cost.
+
+**Pass.** Lower peak context with no more failed or stopped forks.
 
 <br />
 

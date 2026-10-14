@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -21,8 +21,10 @@ import {
   SessionManager,
   SettingsManager
 } from '@earendil-works/pi-coding-agent';
+import { EVENT_TYPE, META_TYPE } from '../src/events.js';
 import episodes from '../src/index.js';
 import { readStamp } from '../src/stamps.js';
+import { episodeStats, statsLines } from '../src/stats.js';
 
 type Step = (context: TranscriptContext) => AssistantMessage | Promise<AssistantMessage>;
 
@@ -555,6 +557,86 @@ test('a fork folds its own work, and recall and ask reach the fold inside it', a
     await harness.session.prompt('make it build in a fork');
     if (harness.failures[0]) throw harness.failures[0];
     assert.equal(harness.pending(), 0);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('stats read the session: folds, rejections, cues followed, and the drop after a fold', async () => {
+  let handle = '';
+  const harness = await createSession(
+    [
+      () =>
+        fauxAssistantMessage(fauxToolCall('bash', { command: 'printf one > a.txt; seq 1 3000' })),
+      () => fauxAssistantMessage(fauxToolCall('read', { path: 'b.txt' })),
+      () => fauxAssistantMessage(fauxToolCall('fold', { since: 't99', note: 'x' })),
+      () =>
+        fauxAssistantMessage(
+          fauxToolCall('fold', { since: 't2', note: 'Wrote a.txt, read b.txt.' })
+        ),
+      (context) => {
+        handle = /ep-[0-9a-f]{8}/.exec(text(conversation(context).at(-1)!))![0];
+        return fauxAssistantMessage(fauxToolCall('read', { path: 'b.txt' }));
+      },
+      () => fauxAssistantMessage(fauxToolCall('recall', { query: 'printf' })),
+      // Folds a span holding the cue's entry, which sits between a call and its result.
+      () =>
+        fauxAssistantMessage(fauxToolCall('fold', { since: 't6', note: 'Looked at b.txt again.' })),
+      (context) => {
+        const messages = conversation(context);
+        assert.ok(!messages.some((message) => /was also touched/.test(text(message))));
+        assert.match(text(messages.at(-1)!), /Looked at b\.txt again\./);
+        return fauxAssistantMessage('done');
+      }
+    ],
+    { git: true }
+  );
+
+  try {
+    await writeFile(join(harness.dir, 'b.txt'), 'two\n');
+    await harness.session.prompt('go');
+    if (harness.failures[0]) throw harness.failures[0];
+    assert.equal(harness.pending(), 0);
+
+    const branch = harness.session.sessionManager.getBranch();
+    const events = branch.flatMap((entry) =>
+      entry.type === 'custom' && entry.customType === EVENT_TYPE ? [entry.data] : []
+    );
+    assert.deepEqual(
+      events.map(
+        (event) =>
+          (event as { kind: string; reason?: string }).reason ?? (event as { kind: string }).kind
+      ),
+      ['no-such-stamp', 'cue']
+    );
+    const meta = branch.find((entry) => entry.type === 'custom' && entry.customType === META_TYPE);
+    assert.match(
+      String((meta as { data?: { promptHash?: string } })?.data?.promptHash),
+      /^[0-9a-f]{12}$/
+    );
+
+    const stats = episodeStats(branch, harness.dir);
+    assert.equal(stats.folds.count, 2);
+    assert.equal(stats.folds.rejected, 1);
+    assert.equal(stats.folds.retriedOk, 1);
+    assert.equal(stats.folds.notAlone, 0);
+    // The second fold came right before the final reply.
+    assert.equal(stats.folds.beforeFinal, 1);
+    assert.deepEqual(stats.cues, { shown: 1, followed: 1, readOnly: 1, capped: 0 });
+    assert.equal(stats.recall.count, 1);
+    assert.equal(stats.requests.length, 8);
+    // The request after the first fold is the one that drops.
+    const after = stats.requests.findIndex((point) => point.after === 'fold');
+    assert.equal(after, 4);
+    assert.ok(stats.requests[after]!.tokens < stats.requests[after - 1]!.tokens);
+    assert.ok(stats.folds.saved > 0);
+    assert.ok(stats.overhead.stamps > 0);
+    const lines = statsLines(stats);
+    assert.match(lines[0]!, /^context per request {2}[▁▂▃▄▅▆▇█]{8}$/);
+    assert.ok(lines.some((line) => /^folds 2, .*1 right before a final reply/.test(line)));
+    assert.ok(lines.includes('fold errors 1, next fold succeeded after 1'));
+    assert.ok(lines.includes('cues 1, followed 1 (1 read-only)'));
+    assert.ok(handle);
   } finally {
     await harness.cleanup();
   }

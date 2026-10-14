@@ -75,13 +75,20 @@ export function registerAsk(pi: ExtensionAPI, state: EpisodeState): void {
           response.content.flatMap((block) => (block.type === 'text' ? [block] : []))
         ).trim() ||
         'The thread tried to act instead of answering. Use fork if the question needs new work.';
-      const notes = await staleness(state, [thread]);
+      const stale = await staleness(state, [thread]);
+      const details: AskDetails = { handle: thread.handle, question: params.question };
+      if (stale.length > 0) details.stale = stale.map(({ handle, files }) => ({ handle, files }));
 
       return {
         content: [
-          { type: 'text', text: [...notes, `[${thread.handle} answers]`, answer].join('\n') }
+          {
+            type: 'text',
+            text: [...stale.map((note) => note.line), `[${thread.handle} answers]`, answer].join(
+              '\n'
+            )
+          }
         ],
-        details: { handle: thread.handle, question: params.question },
+        details,
         usage: response.usage
       };
     }

@@ -18,10 +18,13 @@ import {
   isFoldDetails,
   ThreadIndex
 } from './archive.js';
-import { estimateTokens, touchedPaths } from './messages.js';
+import { anchorGapTokens } from './cache.js';
+import { type FoldRejection, recordEvent } from './events.js';
+import { estimateTokens, readOnlyPaths, touchedPaths } from './messages.js';
 import type { DiskChange } from './snapshots.js';
 import { parseStamp, readStamp, stampLabel, unstampedText } from './stamps.js';
 import type { EpisodeState } from './state.js';
+import { episodeStats, statsLines } from './stats.js';
 import { foldRenderers, formatTokens, refreshStatus } from './ui.js';
 
 /** User text above this size is kept as a head plus a pointer into the archive. */
@@ -40,6 +43,9 @@ export interface FoldPlan {
   omitted: AgentMessage[];
   /** Everything the span held, for file tracking. */
   spanMessages: AgentMessage[];
+  /** Messages before the span, and those the request that called fold was sent with. */
+  before: AgentMessage[];
+  sent: AgentMessage[];
   keptUserTurns: string[];
   edits: ContextEditEntryDraft[];
 }
@@ -94,13 +100,6 @@ function capUserContent(
   });
 }
 
-/**
- * Works out which entries a fold removes. `since` names the first stamped message inside
- * the episode; when that is a tool result, the span starts at the response that made the
- * call, so the episode is folded from its turn boundary and no call loses its result. The
- * span ends before the response that called fold: that response and the fold result stay,
- * so the context still ends on a tool result.
- */
 export interface FoldableTurn {
   stamp: number;
   label: string;
@@ -146,6 +145,23 @@ export interface FoldOptions {
   applied?: ReadonlySet<string>;
 }
 
+/** A fold the tool refused, with why, so rejections can be counted by cause. */
+export class FoldError extends Error {
+  readonly reason: FoldRejection;
+
+  constructor(reason: FoldRejection, message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}
+
+/**
+ * Works out which entries a fold removes. `since` names the first stamped message inside
+ * the episode; when that is a tool result, the span starts at the response that made the
+ * call, so the episode is folded from its turn boundary and no call loses its result. The
+ * span ends before the response that called fold: that response and the fold result stay,
+ * so the context still ends on a tool result.
+ */
 export function planFold(
   entries: readonly ProjectedSessionEntry[],
   foldCallId: string,
@@ -155,7 +171,10 @@ export function planFold(
   const { latestStamp, floorIndex = -1 } = options;
   const foldIndex = entries.findIndex((entry) => callsTool(entry, foldCallId));
   if (foldIndex < 0) {
-    throw new Error('The response that called fold is not in the current context.');
+    throw new FoldError(
+      'not-in-context',
+      'The response that called fold is not in the current context.'
+    );
   }
 
   const foldResponse = entryMessage(entries[foldIndex]!);
@@ -164,7 +183,7 @@ export function planFold(
       ? foldResponse.content.find((block) => block.type === 'toolCall' && block.name === FOLD_TOOL)
       : undefined;
   if (firstFold?.type === 'toolCall' && firstFold.id !== foldCallId) {
-    throw new Error('Only one fold per response; this one was ignored.');
+    throw new FoldError('one-per-response', 'Only one fold per response; this one was ignored.');
   }
 
   // Nothing before the latest applied note or the compaction summary can be folded: the
@@ -187,7 +206,8 @@ export function planFold(
       : `The earliest stamp you can fold from is ${stampLabel(earliest)}.`;
 
   if (latestStamp !== undefined && since > latestStamp) {
-    throw new Error(
+    throw new FoldError(
+      'no-such-stamp',
       `${stampLabel(since)} does not exist; the latest stamp is ${stampLabel(latestStamp)}. ${pick}`
     );
   }
@@ -196,12 +216,13 @@ export function planFold(
   );
   if (sinceIndex < 0) {
     // A compaction summary can still mention it, but the turn itself is gone.
-    throw new Error(
+    throw new FoldError(
+      'gone',
       `${stampLabel(since)} is no longer in your context: it was compacted or already folded. ${pick}`
     );
   }
   if (sinceIndex >= foldIndex) {
-    throw new Error(`${stampLabel(since)} is not before this fold call.`);
+    throw new FoldError('not-before-call', `${stampLabel(since)} is not before this fold call.`);
   }
 
   let startIndex = sinceIndex;
@@ -214,20 +235,23 @@ export function planFold(
   }
 
   if (startIndex <= boundary) {
-    const what =
+    const [reason, what]: [FoldRejection, string] =
       boundary === lastNote
-        ? 'an earlier fold note'
+        ? ['behind-note', 'an earlier fold note']
         : boundary === compaction
-          ? 'the compaction summary'
-          : 'the start of this fork; a fork folds only its own work';
-    throw new Error(`A fold cannot reach behind ${what}. ${pick}`);
+          ? ['behind-compaction', 'the compaction summary']
+          : ['behind-fork-start', 'the start of this fork; a fork folds only its own work'];
+    throw new FoldError(reason, `A fold cannot reach behind ${what}. ${pick}`);
   }
 
   const span = entries.slice(startIndex, foldIndex);
   if (
     !span.some((entry) => entry.messages.length > 0 && entryMessage(entry)?.role === 'assistant')
   ) {
-    throw new Error(`Nothing to fold from ${stampLabel(since)}: the span holds no responses.`);
+    throw new FoldError(
+      'nothing-to-fold',
+      `Nothing to fold from ${stampLabel(since)}: the span holds no responses.`
+    );
   }
 
   const first = span[0]!;
@@ -285,6 +309,8 @@ export function planFold(
     lastEntryId: last.sourceEntry.id,
     omitted,
     spanMessages: span.flatMap((entry) => entry.messages),
+    before: entries.slice(0, startIndex).flatMap((entry) => entry.messages),
+    sent: entries.slice(0, foldIndex).flatMap((entry) => entry.messages),
     keptUserTurns,
     edits
   };
@@ -401,21 +427,35 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
     renderResult: foldRenderers.renderResult,
 
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const since = parseStamp(params.since);
-      if (since === undefined) {
-        throw new Error(`since must be a turn stamp such as "t12", got "${params.since}".`);
-      }
+      // A /fold request is used up by this call, whether it succeeds or not.
+      const manual = state.manualFold;
+      state.manualFold = undefined;
+      let plan: FoldPlan;
+      let since: number | undefined;
       const note = params.note.trim();
-      if (!note) {
-        throw new Error('The note is empty. Write what the rest of the task needs from the span.');
+      try {
+        since = parseStamp(params.since);
+        if (since === undefined) {
+          throw new FoldError(
+            'bad-stamp',
+            `since must be a turn stamp such as "t12", got "${params.since}".`
+          );
+        }
+        if (!note) {
+          throw new FoldError(
+            'empty-note',
+            'The note is empty. Write what the rest of the task needs from the span.'
+          );
+        }
+        plan = planFold(ctx.sessionManager.buildSessionProjection().entries, toolCallId, since, {
+          latestStamp: state.nextStamp - 1
+        });
+      } catch (error) {
+        if (error instanceof FoldError) {
+          recordEvent(pi, { kind: 'fold-rejected', toolCallId, reason: error.reason });
+        }
+        throw error;
       }
-
-      const plan = planFold(
-        ctx.sessionManager.buildSessionProjection().entries,
-        toolCallId,
-        since,
-        { latestStamp: state.nextStamp - 1 }
-      );
       const sinceLabel = stampLabel(since);
       const lastStamp = plan.spanMessages.map(readStamp).findLast((stamp) => stamp !== undefined);
       const untilLabel =
@@ -426,6 +466,7 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
       let changes: DiskChange[] | undefined;
       let treeAfter: string | undefined;
       const snapshots = state.snapshots;
+      const anchorPlaced = state.anchorPlaced;
       if (snapshots) {
         treeAfter = await snapshots.snapshot();
         // The span starts from the tree at its last stamp before the first response, such as
@@ -465,10 +506,22 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
       if (treeAfter) details.treeAfter = treeAfter;
       const open = openItems(note);
       if (open) details.open = open;
+      const readOnly = readOnlyPaths(
+        plan.spanMessages,
+        state.cwd,
+        (changes ?? []).map((change) => change.path)
+      );
+      if (readOnly.length > 0) details.readOnly = readOnly;
+      details.noteTokens = Math.ceil(note.length / 4);
+      if (manual) details.manual = manual;
+      const gapTokens = anchorGapTokens(plan.sent, plan.before);
+      details.anchor = {
+        ...(anchorPlaced === undefined ? {} : { placed: anchorPlaced }),
+        ...(gapTokens === undefined ? {} : { gapTokens })
+      };
 
       // A /fold request ends the run here; an autonomous fold continues the task.
-      const terminate = state.manualFold;
-      state.manualFold = false;
+      const terminate = manual !== undefined;
 
       return {
         content: [
@@ -528,9 +581,12 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
     refreshStatus(ctx, state);
   });
 
-  pi.on('agent_settled', () => {
+  // The edits from the last turn_end are committed after its handlers run; a fold that ended
+  // the run would otherwise not show until the next response.
+  pi.on('agent_settled', (_event, ctx) => {
     state.pendingFolds.clear();
-    state.manualFold = false;
+    state.manualFold = undefined;
+    refreshStatus(ctx, state);
   });
 
   pi.registerCommand('fold', {
@@ -559,7 +615,7 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
         since = turns.find((turn) => turn.label === choice)?.stamp;
         if (since === undefined) return;
       }
-      state.manualFold = true;
+      state.manualFold = since === undefined ? 'request' : 'since';
       const target =
         since === undefined ? 'Pick the span that is done' : `Use since "${stampLabel(since)}"`;
       pi.sendMessage(
@@ -584,8 +640,22 @@ export function registerFold(pi: ExtensionAPI, state: EpisodeState): void {
   });
 
   pi.registerCommand('episodes', {
-    description: 'List the folded spans and forks archived on this branch',
-    handler: async (_args, ctx) => {
+    description:
+      'List the folded spans and forks archived on this branch; /episodes stats shows the numbers',
+    getArgumentCompletions: (prefix) =>
+      'stats'.startsWith(prefix.trim())
+        ? [{ value: 'stats', label: 'stats', description: 'Measurements for this branch' }]
+        : null,
+    handler: async (args, ctx) => {
+      if (args.trim() === 'stats') {
+        const lines = statsLines(episodeStats(ctx.sessionManager.getBranch(), state.cwd));
+        ctx.ui.notify(lines.join('\n'), 'info');
+        return;
+      }
+      if (args.trim()) {
+        ctx.ui.notify('Usage: /episodes [stats]', 'error');
+        return;
+      }
       const threads = await new ThreadIndex(ctx.sessionManager, state.forkArchives).onBranch();
       if (threads.length === 0) {
         ctx.ui.notify('Nothing archived on this branch yet.', 'info');

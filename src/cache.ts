@@ -1,5 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { FOLD_TOOL } from './archive.js';
+import { estimateTokens } from './messages.js';
 import { readStamp, stampLabel } from './stamps.js';
 
 /**
@@ -33,6 +34,30 @@ export function cacheAnchor(messages: readonly AgentMessage[]): CacheAnchor | un
     if (stamp !== undefined) return { stamp: `[${stampLabel(stamp)}]` };
   }
   return undefined;
+}
+
+function isAnchor(message: AgentMessage, anchor: CacheAnchor): boolean {
+  if ('toolUseId' in anchor) {
+    return message.role === 'toolResult' && message.toolCallId === anchor.toolUseId;
+  }
+  const stamp = message.role === 'user' ? readStamp(message) : undefined;
+  return stamp !== undefined && `[${stampLabel(stamp)}]` === anchor.stamp;
+}
+
+/**
+ * Tokens between the anchor of the request that called fold and the start of the span: what
+ * the request after the fold writes to the cache again, since its anchor reads only up to
+ * there. Undefined when there was no anchor, or it sat inside the span and covers nothing
+ * the fold keeps.
+ */
+export function anchorGapTokens(
+  sent: readonly AgentMessage[],
+  before: readonly AgentMessage[]
+): number | undefined {
+  const anchor = cacheAnchor(sent);
+  if (!anchor) return undefined;
+  const at = before.findLastIndex((message) => isAnchor(message, anchor));
+  return at < 0 ? undefined : estimateTokens(before.slice(at + 1));
 }
 
 type Block = Record<string, unknown>;
@@ -89,7 +114,19 @@ function findTarget(payload: AnthropicPayload, anchor: CacheAnchor): Block | und
  * anything, `undefined` otherwise.
  */
 export function anchorBreakpoint(payload: unknown, anchor: CacheAnchor | undefined): unknown {
-  if (!anchor || !isAnthropicPayload(payload)) return undefined;
+  return placeAnchor(payload, anchor).payload;
+}
+
+/**
+ * `anchorBreakpoint`, also telling whether the anchor holds a breakpoint afterwards (it may
+ * already have had one). `placed` is undefined when the request has no breakpoints to follow.
+ */
+export function placeAnchor(
+  payload: unknown,
+  anchor: CacheAnchor | undefined
+): { payload?: unknown; placed?: boolean } {
+  if (!isAnthropicPayload(payload)) return {};
+  if (!anchor) return { placed: false };
 
   const system = blocksOf(payload.system);
   const holders = [
@@ -101,10 +138,11 @@ export function anchorBreakpoint(payload: unknown, anchor: CacheAnchor | undefin
   // Anthropic requires longer TTLs before shorter ones. The anchor sits before the
   // conversation's last breakpoint, so copying that one's marker keeps the order valid.
   const marker = holders.at(-1)?.cache_control;
-  if (marker === undefined) return undefined;
+  if (marker === undefined) return {};
 
   const target = findTarget(payload, anchor);
-  if (!target || target.cache_control !== undefined) return undefined;
+  if (!target) return { placed: false };
+  if (target.cache_control !== undefined) return { placed: true };
 
   if (holders.length >= MAX_BREAKPOINTS) {
     const identity = system[0];
@@ -113,11 +151,11 @@ export function anchorBreakpoint(payload: unknown, anchor: CacheAnchor | undefin
       identity?.text !== CLAUDE_CODE_IDENTITY ||
       identity.cache_control === undefined
     ) {
-      return undefined;
+      return { placed: false };
     }
     delete identity.cache_control;
   }
 
   target.cache_control = marker;
-  return payload;
+  return { payload, placed: true };
 }

@@ -46,7 +46,7 @@ The terms, as in the post: an **episode** is one span of work around a local que
    /fold t13
    ```
 
-   `/episodes` lists what is archived on the current branch.
+   `/episodes` lists what is archived on the current branch, and `/episodes stats` shows what the folds did to it (see [Numbers](#numbers)).
 
 4. Then give it a task that depends on something inside the fold, and watch what it does with the note: carry on from it, go back with `recall` or `ask`, or guess. That is the smallest experiment the post suggests, and [MEASUREMENTS.md](MEASUREMENTS.md) builds from there.
 
@@ -119,11 +119,50 @@ With Anthropic, `pi-episodes` keeps a cache breakpoint on the newest fold note o
 
 <br />
 
+## Numbers
+
+The footer shows context per request as a small graph of the last 16 requests, next to what is archived on the branch:
+
+```text
+episodes ▃▄▅▆▇▂▃▄▅▆▂▃ 2 folded (~41k), 1 fork(s)
+```
+
+Each bar is the context one main-thread request was sent with, scaled to the largest bar shown. The bar after a fold is green and the one after a compaction is yellow, so the drops can be told apart.
+
+`/episodes stats` prints the rest for the current branch, a line per thing that happened:
+
+```text
+context per request  ▃▄▅▆▇▂▃▄▅▆▂▃▄▅▆▇▂▃
+folds 2, median ~18k, notes ~1k (1 span picked by you)
+fold errors 1, next fold succeeded after 1
+context ~41k folded, ~380k fewer tokens sent since, compactions 0
+cache missed after fold avg ~24k, anchor placed 2/2, anchor to span start avg ~3k
+recall 3 (1 empty), ask 1, stale 1 (re-read 1)
+cues 2, followed 1 (1 read-only)
+forks 1, 6 turns, $0.12
+added by the extension ~2k (stamps ~1k, cues ~0, reminders and notices ~1k), prompt ~1k per request
+```
+
+Token counts are estimates (about four characters a token), except the request sizes and the cache miss after each fold (input plus cache write, so it compares across providers that do and do not report cache writes), which come from the provider's usage. The anchor lines only appear with providers that take cache breakpoints, such as Anthropic. "Fewer tokens sent" counts each fold's span minus its note on every later request, until a compaction. A cue is followed when a `recall` matching that thread, or an `ask` of it, comes within the next three responses.
+
+The numbers are read from the session entries alone, so older and resumed sessions show them too. Most come from the records already on the tool results; what has no record of its own is written as `episodes-event` entries (fold errors with their cause, and each file-touch cue), and an `episodes-meta` entry at session start records the version, a hash of the prompt and tool descriptions, pi's version and the settings. Pi never sends these entries to the model. Scripts outside pi can compute the same numbers from a session file:
+
+```ts
+import { episodeStats, statsLines } from 'pi-episodes/stats';
+
+const stats = episodeStats(branchEntries, cwd);
+```
+
+To measure what the cache anchor saves, turn it off with `{ "episodes": { "cacheAnchor": false } }`. [MEASUREMENTS.md](MEASUREMENTS.md) says which of its questions these numbers answer and which still need a person.
+
+<br />
+
 ## What is stored where
 
 | Data | Location |
 | --- | --- |
 | Stamps, notes, fold and fork records, open-item reminders, compaction notices | The session file: on the messages and tool results themselves, plus a marker entry per applied fold and a custom message per reminder or notice. Compacted-turn threads are derived from pi's compaction entries; nothing extra is stored |
+| Measurement events and run metadata | The session file, as `episodes-event` and `episodes-meta` custom entries, which are never sent to the model |
 | Fork transcripts | `<session>.episodes/<handle>.json` next to the session file, or memory for `--no-session` |
 | Recall overflow | `<session>.episodes/recall-<time>-<query>.txt`, or the OS temp directory for `--no-session` |
 | Recall search index | Memory only: built on the first ranked `recall` of a session from the archive, then added to as threads are archived |

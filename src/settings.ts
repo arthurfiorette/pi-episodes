@@ -11,14 +11,21 @@ export interface EpisodesSettings {
   openReminderMaxTokens: number;
   /** After a compaction, tell the agent the compacted turns are archived and recallable. */
   compactionNotice: boolean;
+  /** Keep a cache breakpoint where the next fold can start. Off only to measure what it saves. */
+  cacheAnchor: boolean;
 }
 
 const DEFAULTS: EpisodesSettings = {
   forkTimeoutMs: 30 * 60 * 1000,
   openReminder: true,
   openReminderMaxTokens: 300,
-  compactionNotice: true
+  compactionNotice: true,
+  cacheAnchor: true
 };
+
+function flag(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
 
 function positive(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
@@ -28,9 +35,9 @@ export function episodesSettings(settings: object): EpisodesSettings {
   const raw = (settings as { episodes?: Record<string, unknown> }).episodes ?? {};
   return {
     forkTimeoutMs: positive(raw.forkTimeoutMs, DEFAULTS.forkTimeoutMs),
-    openReminder: typeof raw.openReminder === 'boolean' ? raw.openReminder : DEFAULTS.openReminder,
+    openReminder: flag(raw.openReminder, DEFAULTS.openReminder),
     openReminderMaxTokens: positive(raw.openReminderMaxTokens, DEFAULTS.openReminderMaxTokens),
-    compactionNotice:
-      typeof raw.compactionNotice === 'boolean' ? raw.compactionNotice : DEFAULTS.compactionNotice
+    compactionNotice: flag(raw.compactionNotice, DEFAULTS.compactionNotice),
+    cacheAnchor: flag(raw.cacheAnchor, DEFAULTS.cacheAnchor)
   };
 }

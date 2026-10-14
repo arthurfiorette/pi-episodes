@@ -2,9 +2,10 @@ import { relative, resolve } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { threadRecords } from './archive.js';
 import { registerAsk } from './ask.js';
-import { anchorBreakpoint, cacheAnchor } from './cache.js';
+import { cacheAnchor, placeAnchor } from './cache.js';
 import { registerCompactionNotice } from './compaction.js';
 import { registerStampDisplay } from './display.js';
+import { recordEvent, recordMeta } from './events.js';
 import { registerFold } from './fold.js';
 import { registerFork } from './fork.js';
 import { ForkRegistry, registerForksView } from './forks-view.js';
@@ -12,6 +13,7 @@ import { FILE_TOOLS } from './messages.js';
 import { EPISODES_SECTION } from './prompt.js';
 import { registerRecall } from './recall.js';
 import { registerReminder } from './reminder.js';
+import { episodesSettings } from './settings.js';
 import { unstampedText, withStamp } from './stamps.js';
 import { EpisodeState } from './state.js';
 import { refreshStatus } from './ui.js';
@@ -25,6 +27,7 @@ export default function episodes(pi: ExtensionAPI): void {
 
   pi.on('session_start', (_event, ctx) => {
     state.reset(ctx);
+    recordMeta(pi, ctx);
     refreshStatus(ctx, state);
   });
 
@@ -62,8 +65,10 @@ export default function episodes(pi: ExtensionAPI): void {
 
   // Stamps are written when the message is persisted, never later, so they never change
   // bytes that are already cached.
-  pi.on('message_end', (event) => {
+  pi.on('message_end', (event, ctx) => {
     const message = event.message;
+    // The graph moves with each response, not only at the end of a turn.
+    if (message.role === 'assistant') refreshStatus(ctx, state, message);
     if (message.role !== 'user' && message.role !== 'toolResult') return undefined;
 
     const stamp = state.nextStamp++;
@@ -76,10 +81,12 @@ export default function episodes(pi: ExtensionAPI): void {
   // The anchor comes from the model's view, not the raw branch: after a compaction the
   // newest stamped user message may only exist in the summary.
   pi.on('before_provider_request', (event, ctx) => {
-    return anchorBreakpoint(
-      event.payload,
-      cacheAnchor(ctx.sessionManager.buildSessionProjection().messages)
-    );
+    const anchor = episodesSettings(pi.getSettings()).cacheAnchor
+      ? cacheAnchor(ctx.sessionManager.buildSessionProjection().messages)
+      : undefined;
+    const placed = placeAnchor(event.payload, anchor);
+    state.anchorPlaced = placed.placed;
+    return placed.payload;
   });
 
   // A snapshot still being written must not see the changes of the next tool call.
@@ -95,19 +102,28 @@ export default function episodes(pi: ExtensionAPI): void {
     if (typeof path !== 'string' || !path) return undefined;
 
     const absolute = resolve(state.cwd, path);
+    const matched = threadRecords(ctx.sessionManager.getBranch()).filter(
+      (record) =>
+        // Compactions record paths as the tools received them, possibly relative.
+        record.files.some((file) => resolve(state.cwd, file) === absolute) &&
+        !state.surfaced.has(`${record.handle}:${absolute}`)
+    );
     // A cue that points at many threads primes none of them; the newest ones are the likely
     // ones, and the rest stay one recall away.
-    const records = threadRecords(ctx.sessionManager.getBranch())
-      .filter(
-        (record) =>
-          // Compactions record paths as the tools received them, possibly relative.
-          record.files.some((file) => resolve(state.cwd, file) === absolute) &&
-          !state.surfaced.has(`${record.handle}:${absolute}`)
-      )
-      .slice(-MAX_SURFACED_THREADS);
+    const records = matched.slice(-MAX_SURFACED_THREADS);
     if (records.length === 0) return undefined;
 
     const shown = relative(state.cwd, absolute);
+    recordEvent(pi, {
+      kind: 'cue',
+      toolCallId: event.toolCallId,
+      file: shown,
+      threads: records.map((record) => ({
+        handle: record.handle,
+        readOnly: record.kind !== 'compaction' && (record.readOnly?.includes(absolute) ?? false)
+      })),
+      matched: matched.length
+    });
     const lines = records.map((record) => {
       state.surfaced.add(`${record.handle}:${absolute}`);
       const kind = { fold: 'folded span', fork: 'fork', compaction: 'compacted turns' }[
