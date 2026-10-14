@@ -1,0 +1,10 @@
+{
+  "scenarios": ["fn-utils", "expr-parsers", "mapped-types"],
+  "conditions": [{ "id": "A" }, { "id": "B", "extension": "../../src/index.ts" }],
+  "runsPerCell": 10,
+  "parallel": 2,
+  "caps": { "goalStepMinutes": 60, "otherStepMinutes": 10, "goalStepTurns": 150, "trialHours": 4 },
+  "checks": { "fullSuite": "goal-steps" },
+  "retry": { "maxRetries": 5, "baseDelayMs": 6000 },
+  "compactionOverrides": {}
+}

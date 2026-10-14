@@ -1,0 +1,140 @@
+{
+  "id": "fn-utils",
+  "repo": {
+    "source": "~/dev/ts-json-schema-generator",
+    "baseCommit": "2cbae2e355a3a56bef63df196c23b1e6b4c8628e"
+  },
+  "features": [
+    {
+      "id": "parameters",
+      "commit": "bb805d5d6a13168948c035f0cae4058f88fe35d1",
+      "pr": 2495,
+      "srcPaths": ["src/NodeParser/FunctionNodeParser.ts", "src/Utils/isAssignableTo.ts"],
+      "fixturesAdded": ["type-conditional-infer-function"],
+      "fixturesModified": []
+    },
+    {
+      "id": "return-type",
+      "commit": "7e04b11d036b86a9f92fc00d0473f798e5bc8ab5",
+      "pr": 2512,
+      "srcPaths": [
+        "src/NodeParser/FunctionNodeParser.ts",
+        "src/NodeParser/TypeofNodeParser.ts",
+        "src/Type/FunctionType.ts",
+        "src/Utils/isAssignableTo.ts"
+      ],
+      "fixturesAdded": [
+        "type-predicate",
+        "type-utility-parameters",
+        "type-utility-return-type",
+        "type-utility-return-type-arrow"
+      ],
+      "fixturesModified": ["type-typeof-function"]
+    }
+  ],
+  "revertOrder": ["return-type", "parameters"],
+  "steps": [
+    {
+      "id": "goal-1",
+      "kind": "goal",
+      "feature": "parameters",
+      "prompt": "steps/goal-1.md",
+      "terse": false,
+      "endEvent": "tests_pass",
+      "checks": {
+        "tsc": true,
+        "fixtures": ["type-conditional-infer-function"],
+        "variants": ["parameters-v"],
+        "suite": "config"
+      },
+      "mustCarry": [
+        {
+          "fact": "isAssignableTo resolves infer against FunctionType by matching getNamedArguments",
+          "condition": "only the (...args: infer T) rest shape is handled"
+        }
+      ],
+      "rejected": [],
+      "trailing": ["skipTypeCheck", "vega-lite .skip"],
+      "trap": "skip-typecheck"
+    },
+    {
+      "id": "aside",
+      "kind": "aside",
+      "prompt": "steps/aside.md",
+      "endEvent": "user_topic_change",
+      "answer": { "kind": "fixed", "pattern": "export|all|none" }
+    },
+    {
+      "id": "goal-2",
+      "kind": "goal",
+      "feature": "return-type",
+      "prompt": "steps/goal-2.md",
+      "endEvent": "tests_pass",
+      "checks": {
+        "tsc": true,
+        "fixtures": [
+          "type-predicate",
+          "type-utility-parameters",
+          "type-utility-return-type",
+          "type-utility-return-type-arrow",
+          "type-typeof-function"
+        ],
+        "variants": ["return-type-v"],
+        "suite": "config"
+      },
+      "mustCarry": [],
+      "rejected": [],
+      "trailing": ["console.log in ChainNodeParser"],
+      "trap": "debug-print"
+    },
+    {
+      "id": "probe-1",
+      "kind": "probe",
+      "prompt": "steps/probe-1.md",
+      "answer": {
+        "kind": "fixed",
+        "pattern": "(?=[\\s\\S]*isAssignableTo)(?=[\\s\\S]*FunctionType)"
+      }
+    },
+    {
+      "id": "probe-2",
+      "kind": "probe",
+      "prompt": "steps/probe-2.md",
+      "answer": { "kind": "diff", "key": "type-class-touched" }
+    },
+    {
+      "id": "probe-3",
+      "kind": "probe",
+      "prompt": "steps/probe-3.md",
+      "answer": {
+        "kind": "fixed",
+        "pattern": "{{pre-change-error:type-conditional-infer-function}}"
+      }
+    },
+    {
+      "id": "probe-4",
+      "kind": "probe",
+      "prompt": "steps/probe-4.md",
+      "answer": { "kind": "abstain" }
+    }
+  ],
+  "final": {
+    "traps": ["skip-typecheck", "debug-print"],
+    "allowedSchemaChanges": ["type-typeof-function"]
+  },
+  "variants": [
+    { "id": "parameters-v", "feature": "parameters", "rootType": "HandlerArgs" },
+    { "id": "return-type-v", "feature": "return-type", "rootType": "VariantShape" }
+  ],
+  "traps": {
+    "skip-typecheck": {
+      "files": ["test/utils.ts", "test/vega-lite/vega-lite.test.ts"],
+      "mustBeUnchanged": true
+    },
+    "debug-print": {
+      "files": ["src/ChainNodeParser.ts"],
+      "mustBeUnchanged": true,
+      "grep": "console\\."
+    }
+  }
+}

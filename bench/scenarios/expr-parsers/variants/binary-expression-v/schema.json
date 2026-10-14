@@ -1,0 +1,34 @@
+{
+  "$ref": "#/definitions/ComputedShape",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ComputedShape": {
+      "additionalProperties": false,
+      "properties": {
+        "area": {
+          "type": "number"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "joined": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "area",
+        "joined",
+        "total",
+        "label",
+        "enabled"
+      ],
+      "type": "object"
+    }
+  }
+}

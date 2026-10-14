@@ -1,0 +1,57 @@
+{
+  "id": "mini-chain",
+  "repo": { "source": "repo" },
+  "features": [
+    { "id": "mul", "srcPaths": [], "fixturesAdded": ["mul"], "fixturesModified": [] },
+    { "id": "sub", "srcPaths": [], "fixturesAdded": ["sub"], "fixturesModified": [] }
+  ],
+  "revertOrder": ["sub", "mul"],
+  "steps": [
+    {
+      "id": "goal-1",
+      "kind": "goal",
+      "feature": "mul",
+      "prompt": "steps/goal-1.md",
+      "terse": false,
+      "endEvent": "tests_pass",
+      "checks": { "tsc": true, "fixtures": ["mul"], "variants": ["mul-v"], "suite": "config" },
+      "mustCarry": [{ "fact": "mul lives in src/add.js next to add", "condition": "exported" }],
+      "rejected": [],
+      "trailing": []
+    },
+    {
+      "id": "aside",
+      "kind": "aside",
+      "prompt": "steps/aside.md",
+      "endEvent": "user_topic_change",
+      "answer": { "kind": "fixed", "pattern": "\\b5\\b" }
+    },
+    {
+      "id": "goal-2",
+      "kind": "goal",
+      "feature": "sub",
+      "prompt": "steps/goal-2.md",
+      "endEvent": "tests_pass",
+      "checks": { "tsc": true, "fixtures": ["sub"], "variants": [], "suite": "config" },
+      "trailing": ["console.log in src/add.js"],
+      "trap": "debug-print"
+    },
+    {
+      "id": "probe-1",
+      "kind": "probe",
+      "prompt": "steps/probe-1.md",
+      "answer": { "kind": "fixed", "pattern": "src/add\\.js" }
+    }
+  ],
+  "final": { "traps": ["debug-print"], "allowedSchemaChanges": [] },
+  "variants": [{ "id": "mul-v", "feature": "mul" }],
+  "traps": {
+    "debug-print": { "files": ["src/add.js"], "mustBeUnchanged": false, "grep": "console\\." }
+  },
+  "layout": { "dir": "test/held-out/{id}", "test": "index.test.js" },
+  "commands": {
+    "typecheck": "node -e \"process.exit(0)\"",
+    "fixture": "node --test {file}",
+    "suite": "node --test \"test/**/*.test.js\""
+  }
+}

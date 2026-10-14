@@ -1,0 +1,48 @@
+{
+  "scenario": "mapped-types",
+  "validatedAt": "2026-10-13T22:56:39.400Z",
+  "repeats": 3,
+  "suiteTests": {
+    "sealed": 375,
+    "restored": 379
+  },
+  "suiteDurationMs": {
+    "sealed": 63360,
+    "restored": 62370
+  },
+  "fixtureTests": {
+    "type-mapped-any": 1,
+    "type-mapped-template-literal": 1,
+    "type-mapped-required": 1,
+    "type-mapped-enum-required": 1,
+    "type-mapped-number": 0
+  },
+  "fixtureRootTypes": {
+    "type-mapped-any": "MyObject",
+    "type-mapped-template-literal": "MyObject",
+    "type-mapped-required": "MyObject",
+    "type-mapped-enum-required": "MyObject",
+    "type-mapped-number": "*"
+  },
+  "preChange": {
+    "type-mapped-any": {
+      "threw": true,
+      "message": "Unexpected key type \"any\" for this node. (expected \"UnionType\" or \"StringType\")"
+    },
+    "type-mapped-template-literal": {
+      "threw": false
+    },
+    "type-mapped-required": {
+      "threw": false
+    },
+    "type-mapped-enum-required": {
+      "threw": false
+    },
+    "type-mapped-number": {
+      "threw": false
+    }
+  },
+  "ok": true,
+  "failures": [],
+  "baseCommit": "2cbae2e355a3a56bef63df196c23b1e6b4c8628e"
+}

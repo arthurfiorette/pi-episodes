@@ -1,0 +1,83 @@
+{
+  "$ref": "#/definitions/VariantShape",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "VariantShape": {
+      "additionalProperties": false,
+      "properties": {
+        "describeArgs": {
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "verbose": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "count"
+          ],
+          "type": "object"
+        },
+        "described": {
+          "type": "string"
+        },
+        "guard": {
+          "$ref": "#/definitions/isNumeric"
+        },
+        "point": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "point",
+        "describeArgs",
+        "described",
+        "guard"
+      ],
+      "type": "object"
+    },
+    "isNumeric": {
+      "$comment": "(input: string | number) => input is number",
+      "properties": {
+        "namedArgs": {
+          "additionalProperties": false,
+          "properties": {
+            "input": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          },
+          "required": [
+            "input"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "object"
+    }
+  }
+}

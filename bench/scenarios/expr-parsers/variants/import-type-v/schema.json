@@ -1,0 +1,54 @@
+{
+  "$ref": "#/definitions/BridgedContainer",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BridgedContainer": {
+      "additionalProperties": false,
+      "properties": {
+        "bridged": {
+          "$ref": "#/definitions/Thing%3Cstring%2Cstring%3E"
+        },
+        "item": {
+          "$ref": "#/definitions/Thing%3Cnumber%2Cboolean%3E"
+        }
+      },
+      "required": [
+        "item",
+        "bridged"
+      ],
+      "type": "object"
+    },
+    "Thing<number,boolean>": {
+      "additionalProperties": false,
+      "properties": {
+        "first": {
+          "type": "number"
+        },
+        "second": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "first",
+        "second"
+      ],
+      "type": "object"
+    },
+    "Thing<string,string>": {
+      "additionalProperties": false,
+      "properties": {
+        "first": {
+          "type": "string"
+        },
+        "second": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "first",
+        "second"
+      ],
+      "type": "object"
+    }
+  }
+}

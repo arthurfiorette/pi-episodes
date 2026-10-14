@@ -1,0 +1,4 @@
+[
+  { "label": "sonnet-4-5-med", "model": "anthropic/claude-sonnet-4-5", "thinking": "medium" },
+  { "label": "gpt-5-med", "model": "openai/gpt-5", "thinking": "medium" }
+]

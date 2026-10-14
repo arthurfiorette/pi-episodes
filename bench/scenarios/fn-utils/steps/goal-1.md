@@ -1,0 +1,1 @@
+`Parameters<(a: string, b: number) => void>` throws instead of producing a tuple schema `[string, number]`. Conditional types with `infer` already work for arrays and tuples, so it looks like function parameter positions just aren't handled.

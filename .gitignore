@@ -2,3 +2,7 @@ node_modules
 dist
 coverage
 *.log
+bench/results/
+bench/cache/
+# Only the credentials file. models.pi.json is tracked: its apiKey must be a $ENV reference.
+bench/config/auth.json

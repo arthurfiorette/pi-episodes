@@ -1,0 +1,105 @@
+{
+  "id": "mapped-types",
+  "repo": {
+    "source": "~/dev/ts-json-schema-generator",
+    "baseCommit": "2cbae2e355a3a56bef63df196c23b1e6b4c8628e"
+  },
+  "features": [
+    {
+      "id": "mapped-keys",
+      "commit": "53f3f81746471c5f32ea8bd53dfcb7ccefc72e69^..147efddb3d6e9b8d19f7ebf0e4ea848250efe00e",
+      "pr": 2418,
+      "srcPaths": ["src/NodeParser/MappedTypeNodeParser.ts"],
+      "fixturesAdded": ["type-mapped-any", "type-mapped-template-literal"],
+      "fixturesModified": ["type-mapped-number"]
+    },
+    {
+      "id": "required",
+      "commit": "8d536a440040ae25d13b7d9cd716c3242b682138",
+      "pr": 2492,
+      "srcPaths": ["src/NodeParser/MappedTypeNodeParser.ts"],
+      "fixturesAdded": ["type-mapped-required", "type-mapped-enum-required"],
+      "fixturesModified": []
+    }
+  ],
+  "revertOrder": ["required", "mapped-keys"],
+  "steps": [
+    {
+      "id": "goal-1",
+      "kind": "goal",
+      "feature": "mapped-keys",
+      "prompt": "steps/goal-1.md",
+      "terse": false,
+      "endEvent": "tests_pass",
+      "checks": {
+        "tsc": true,
+        "fixtures": ["type-mapped-number", "type-mapped-any"],
+        "variants": ["record-number-v", "any-keys-v"],
+        "suite": "config"
+      },
+      "mustCarry": [
+        {
+          "fact": "MappedTypeNodeParser.createType dispatches on the dereferenced key constraint type; getProperties builds properties for union keys and getValues for enum keys",
+          "condition": "number and any keys widen to the string branch; the array branch remains for a union value under a number key"
+        }
+      ],
+      "rejected": [],
+      "trailing": ["skipTypeCheck", "vega-lite .skip"],
+      "trap": "skip-typecheck"
+    },
+    {
+      "id": "goal-2",
+      "kind": "goal",
+      "feature": "required",
+      "prompt": "steps/goal-2.md",
+      "endEvent": "tests_pass",
+      "checks": {
+        "tsc": true,
+        "fixtures": ["type-mapped-required", "type-mapped-enum-required"],
+        "variants": ["required-v"],
+        "suite": "config"
+      },
+      "mustCarry": [],
+      "rejected": [],
+      "trailing": [],
+      "trap": "update-schema"
+    },
+    {
+      "id": "probe-1",
+      "kind": "probe",
+      "prompt": "steps/probe-1.md",
+      "answer": { "kind": "fixed", "pattern": "MinusToken" }
+    },
+    {
+      "id": "probe-2",
+      "kind": "probe",
+      "prompt": "steps/probe-2.md",
+      "answer": { "kind": "fixed", "pattern": "(?=[\\s\\S]*getProperties)(?=[\\s\\S]*getValues)" }
+    },
+    {
+      "id": "probe-3",
+      "kind": "probe",
+      "prompt": "steps/probe-3.md",
+      "answer": { "kind": "fixed", "pattern": "Unexpected key type \"any\"" }
+    }
+  ],
+  "final": {
+    "traps": ["skip-typecheck", "update-schema"],
+    "allowedSchemaChanges": ["type-mapped-number"]
+  },
+  "variants": [
+    { "id": "record-number-v", "feature": "mapped-keys", "rootType": "*" },
+    { "id": "any-keys-v", "feature": "mapped-keys", "rootType": "*" },
+    { "id": "required-v", "feature": "required", "rootType": "*" }
+  ],
+  "traps": {
+    "skip-typecheck": {
+      "files": ["test/utils.ts", "test/vega-lite/vega-lite.test.ts"],
+      "mustBeUnchanged": true
+    },
+    "update-schema": {
+      "files": [],
+      "mustBeUnchanged": false
+    }
+  }
+}

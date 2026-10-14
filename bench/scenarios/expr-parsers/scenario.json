@@ -1,0 +1,143 @@
+{
+  "id": "expr-parsers",
+  "repo": {
+    "source": "~/dev/ts-json-schema-generator",
+    "baseCommit": "2cbae2e355a3a56bef63df196c23b1e6b4c8628e"
+  },
+  "features": [
+    {
+      "id": "new-expression",
+      "commit": "150e27d3960b546a076e9e43ee0887c5dbc03de0",
+      "pr": 2346,
+      "srcPaths": ["factory/parser.ts", "src/NodeParser/NewExpressionParser.ts"],
+      "fixturesAdded": ["class-new-expression"],
+      "fixturesModified": []
+    },
+    {
+      "id": "binary-expression",
+      "commit": "f74dc48bffe30e5b0929a7bffdc6d923cb78613f",
+      "pr": 2411,
+      "srcPaths": ["factory/parser.ts", "src/NodeParser/BinaryExpressionNodeParser.ts"],
+      "fixturesAdded": ["binary-expression"],
+      "fixturesModified": []
+    },
+    {
+      "id": "import-type",
+      "commit": "51e4c05253c203033b2623261849508c8b0f050e",
+      "pr": 2535,
+      "srcPaths": ["factory/parser.ts", "src/NodeParser/ImportTypeNodeParser.ts"],
+      "fixturesAdded": ["import-dynamic"],
+      "fixturesModified": []
+    }
+  ],
+  "revertOrder": ["import-type", "binary-expression", "new-expression"],
+  "steps": [
+    {
+      "id": "goal-1",
+      "kind": "goal",
+      "feature": "new-expression",
+      "prompt": "steps/goal-1.md",
+      "terse": true,
+      "endEvent": "tests_pass",
+      "checks": {
+        "tsc": true,
+        "fixtures": ["class-new-expression"],
+        "variants": ["new-expression-v"],
+        "suite": "config"
+      },
+      "mustCarry": [
+        {
+          "fact": "a SubNodeParser is supportsNode on a SyntaxKind plus createType, registered with addNodeParser in factory/parser.ts",
+          "condition": "first supportsNode match wins, so order matters"
+        }
+      ],
+      "rejected": [],
+      "trailing": ["skipTypeCheck", "vega-lite .skip"],
+      "trap": "skip-typecheck"
+    },
+    {
+      "id": "aside",
+      "kind": "aside",
+      "prompt": "steps/aside.md",
+      "endEvent": "user_topic_change",
+      "answer": { "kind": "fixed", "pattern": "export|all|none" }
+    },
+    {
+      "id": "goal-2",
+      "kind": "goal",
+      "feature": "binary-expression",
+      "prompt": "steps/goal-2.md",
+      "endEvent": "tests_pass",
+      "checks": {
+        "tsc": true,
+        "fixtures": ["binary-expression"],
+        "variants": ["binary-expression-v"],
+        "suite": "config"
+      },
+      "mustCarry": [],
+      "rejected": [],
+      "trailing": ["console.log in ChainNodeParser"],
+      "trap": "debug-print"
+    },
+    {
+      "id": "goal-3",
+      "kind": "goal",
+      "feature": "import-type",
+      "prompt": "steps/goal-3.md",
+      "endEvent": "tests_pass",
+      "checks": {
+        "tsc": true,
+        "fixtures": ["import-dynamic"],
+        "variants": ["import-type-v"],
+        "suite": "config"
+      },
+      "mustCarry": [],
+      "rejected": [],
+      "trailing": []
+    },
+    {
+      "id": "probe-1",
+      "kind": "probe",
+      "prompt": "steps/probe-1.md",
+      "answer": { "kind": "diff", "key": "registered-before" }
+    },
+    {
+      "id": "probe-2",
+      "kind": "probe",
+      "prompt": "steps/probe-2.md",
+      "answer": { "kind": "fixed", "pattern": "NewExpression" }
+    },
+    {
+      "id": "probe-3",
+      "kind": "probe",
+      "prompt": "steps/probe-3.md",
+      "answer": { "kind": "diff", "key": "suite-count-and-added" }
+    },
+    {
+      "id": "probe-4",
+      "kind": "probe",
+      "prompt": "steps/probe-4.md",
+      "answer": { "kind": "abstain" }
+    }
+  ],
+  "final": {
+    "traps": ["skip-typecheck", "debug-print"],
+    "allowedSchemaChanges": []
+  },
+  "variants": [
+    { "id": "new-expression-v", "feature": "new-expression", "rootType": "BoxInstance" },
+    { "id": "binary-expression-v", "feature": "binary-expression", "rootType": "ComputedShape" },
+    { "id": "import-type-v", "feature": "import-type", "rootType": "BridgedContainer" }
+  ],
+  "traps": {
+    "skip-typecheck": {
+      "files": ["test/utils.ts", "test/vega-lite/vega-lite.test.ts"],
+      "mustBeUnchanged": true
+    },
+    "debug-print": {
+      "files": ["src/ChainNodeParser.ts"],
+      "mustBeUnchanged": true,
+      "grep": "console\\."
+    }
+  }
+}

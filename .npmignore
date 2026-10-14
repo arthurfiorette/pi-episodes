@@ -1,6 +1,7 @@
 # whitelist approach
 
 *
+bench/
 
 !LICENSE
 !README.md

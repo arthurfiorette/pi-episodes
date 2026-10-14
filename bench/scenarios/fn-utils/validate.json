@@ -1,0 +1,56 @@
+{
+  "scenario": "fn-utils",
+  "validatedAt": "2026-10-13T22:40:30.999Z",
+  "repeats": 3,
+  "suiteTests": {
+    "sealed": 374,
+    "restored": 379
+  },
+  "suiteDurationMs": {
+    "sealed": 61242,
+    "restored": 66296
+  },
+  "fixtureTests": {
+    "type-conditional-infer-function": 1,
+    "type-predicate": 1,
+    "type-utility-parameters": 1,
+    "type-utility-return-type": 1,
+    "type-utility-return-type-arrow": 1,
+    "type-typeof-function": 0
+  },
+  "fixtureRootTypes": {
+    "type-conditional-infer-function": "FuncParams",
+    "type-predicate": "*",
+    "type-utility-parameters": "MyParameters",
+    "type-utility-return-type": "MyReturnType",
+    "type-utility-return-type-arrow": "MyReturnType",
+    "type-typeof-function": "*"
+  },
+  "preChange": {
+    "type-conditional-infer-function": {
+      "threw": false,
+      "message": "Failed to correctly infer type"
+    },
+    "type-predicate": {
+      "threw": false
+    },
+    "type-utility-parameters": {
+      "threw": false,
+      "message": "Failed to correctly infer type"
+    },
+    "type-utility-return-type": {
+      "threw": false,
+      "message": "Failed to correctly infer type"
+    },
+    "type-utility-return-type-arrow": {
+      "threw": false,
+      "message": "Failed to correctly infer type"
+    },
+    "type-typeof-function": {
+      "threw": false
+    }
+  },
+  "ok": true,
+  "failures": [],
+  "baseCommit": "2cbae2e355a3a56bef63df196c23b1e6b4c8628e"
+}

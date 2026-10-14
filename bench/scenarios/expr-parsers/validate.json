@@ -1,0 +1,40 @@
+{
+  "scenario": "expr-parsers",
+  "validatedAt": "2026-10-13T22:49:04.895Z",
+  "repeats": 3,
+  "suiteTests": {
+    "sealed": 376,
+    "restored": 379
+  },
+  "suiteDurationMs": {
+    "sealed": 60995,
+    "restored": 62415
+  },
+  "fixtureTests": {
+    "class-new-expression": 1,
+    "binary-expression": 1,
+    "import-dynamic": 1
+  },
+  "fixtureRootTypes": {
+    "class-new-expression": "MyType",
+    "binary-expression": "MyObject",
+    "import-dynamic": "MyObject"
+  },
+  "preChange": {
+    "class-new-expression": {
+      "threw": true,
+      "message": "Unknown node of kind \"NewExpression\""
+    },
+    "binary-expression": {
+      "threw": true,
+      "message": "Unknown node of kind \"BinaryExpression\""
+    },
+    "import-dynamic": {
+      "threw": true,
+      "message": "Unknown node of kind \"LastTypeNode\""
+    }
+  },
+  "ok": true,
+  "failures": [],
+  "baseCommit": "2cbae2e355a3a56bef63df196c23b1e6b4c8628e"
+}

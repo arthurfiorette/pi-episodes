@@ -1,0 +1,1 @@
+Back to the parser work. An `as const` object with computed values like `numbers: 60 * 5`, `stringLiterals: "a" + "b"`, `booleanTypes: a || b` crashes `typeof foo` schema generation with `Unknown node of kind "BinaryExpression"`. Widening to the result type (`number`, `string`, `boolean`) would be enough; exact constant evaluation is not needed.

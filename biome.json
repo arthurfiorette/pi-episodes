@@ -12,5 +12,18 @@
     "formatter": {
       "bracketSpacing": true
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "bench/scenarios/**/variants/**",
+        "bench/scenarios/**/fixtures/**",
+        "bench/scenarios/**/reference/**",
+        "bench/test/fixtures/**"
+      ],
+      "formatter": { "enabled": false },
+      "linter": { "enabled": false },
+      "assist": { "enabled": false }
+    }
+  ]
 }

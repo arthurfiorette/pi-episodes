@@ -1,0 +1,1 @@
+`Required<T>` has no effect: for `interface WithOptional { foo?: number; bar?: string }`, `Required<WithOptional>` generates a schema with no `required` array. Same for a mapped type over an enum's keys with `?` then wrapped in `Required<>`. The `-?` modifier should make properties required.
