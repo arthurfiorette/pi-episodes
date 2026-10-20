@@ -1,11 +1,12 @@
 // Compares the arms of a finished Harbor job: pass rate, tokens, cost, time and the episode
 // numbers, per model, with bootstrap intervals over tasks.
 //
-//   pnpm bench:report bench/runs/<job>
+//   pnpm bench:report bench/runs/<job> --format md|table
 //
-// Writes report.md, trials.csv and rows.yaml (Harbor Hub leaderboard rows) into the job dir.
+// Writes trials.csv and rows.yaml; Markdown mode also writes report.md.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parseArgs } from 'node:util';
 import { stringify } from 'yaml';
 import { type SessionNumbers, sessionNumbers } from './session.js';
 
@@ -303,18 +304,24 @@ const k = (value: number) =>
         : value.toFixed(1);
 const num = (value: number, digits = 1) => (Number.isFinite(value) ? value.toFixed(digits) : '-');
 
-function table(header: string[], rows: string[][]): string {
-  return [
-    `| ${header.join(' | ')} |`,
-    `| ${header.map(() => '---').join(' | ')} |`,
-    ...rows.map((row) => `| ${row.join(' | ')} |`)
-  ].join('\n');
+function table(header: string[], rows: string[][]) {
+  return { header, rows };
 }
 
 function main(): number {
-  const dir = process.argv[2];
-  if (!dir || !existsSync(dir)) {
-    console.error('usage: pnpm bench:report bench/runs/<job>');
+  const { values, positionals } = parseArgs({
+    options: { format: { type: 'string' } },
+    allowPositionals: true
+  });
+  const [dir] = positionals;
+  const format = values.format;
+  if (
+    !dir ||
+    positionals.length !== 1 ||
+    !existsSync(dir) ||
+    (format !== 'md' && format !== 'table')
+  ) {
+    console.error('usage: pnpm bench:report bench/runs/<job> --format <md|table>');
     return 2;
   }
   const trials = readdirSync(dir, { withFileTypes: true })
@@ -474,8 +481,21 @@ function main(): number {
   if (errors.length > 0) {
     lines.push('', '## Errors', '', ...errors.map(([type, group]) => `- ${type}: ${group.length}`));
   }
-  const report = `${lines.join('\n')}\n`;
-  writeFileSync(join(dir, 'report.md'), report);
+  const report =
+    format === 'md'
+      ? `${lines
+          .map((line) =>
+            typeof line === 'string'
+              ? line
+              : [
+                  `| ${line.header.join(' | ')} |`,
+                  `| ${line.header.map(() => '---').join(' | ')} |`,
+                  ...line.rows.map((row) => `| ${row.join(' | ')} |`)
+                ].join('\n')
+          )
+          .join('\n')}\n`
+      : undefined;
+  if (report) writeFileSync(join(dir, 'report.md'), report);
 
   const columns: [string, (trial: Trial) => unknown][] = [
     ['task', (t) => t.task],
@@ -531,7 +551,20 @@ function main(): number {
     })
   );
 
-  process.stdout.write(report);
+  if (report) {
+    process.stdout.write(report);
+  } else {
+    for (const line of lines) {
+      if (typeof line === 'string') console.log(line.replace(/^#{1,2} /, ''));
+      else
+        console.table(
+          line.rows.map((row) =>
+            Object.fromEntries(line.header.map((name, index) => [name, row[index]]))
+          ),
+          line.header
+        );
+    }
+  }
   return 0;
 }
 

@@ -119,7 +119,7 @@ The loop that turns runs into prompt changes:
 1. **Edit** `src/prompt.ts` or a tool description. Read the token-budget comment at the top of `EPISODES_SECTION` first: every sentence is paid on every request, each fact has one home (when and why in the prompt, how to call in the tool description), and any wording change changes the prompt hash.
 2. **Check** with `pnpm test` and `pnpm test-types`. `test/session.test.ts` runs real pi sessions with a scripted model, so it catches broken mechanics, not behavior.
 3. **Run** the same tasks, model and machine as the previous run. One attempt per task is enough to see whether folding changed; use more before claiming anything about pass rate.
-4. **Report** with `pnpm bench:report`, comparing against the previous run with the same tasks and model.
+4. **Report** with `pnpm bench:report <run-dir> --format md` (or `--format table` for console tables), comparing against the previous run with the same tasks and model.
 5. **Read transcripts.** The numbers say that something changed; only the episodes arm's session files (`bench/runs/<job>/<trial>/agent/pi/sessions/*.jsonl`) say why. Look for where the model considered folding and decided against it (its reasoning usually says so), finished sub-episodes that stayed in context, notes that dropped a condition or open item, and recalls that came back empty or should have happened.
 6. **Log** what was seen and what changed in [OBSERVATIONS.md](../OBSERVATIONS.md), with the prompt hash before and after.
 

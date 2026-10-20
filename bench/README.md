@@ -90,11 +90,12 @@ While Harbor runs in an interactive terminal, type **q** followed by **Enter**, 
 ## Reading the results
 
 ```sh
-pnpm bench:report bench/runs/<job>-<time>
+pnpm bench:report bench/runs/<job>-<time> --format md
+pnpm bench:report bench/runs/<job>-<time> --format table
 harbor view bench/runs                      # Harbor's trial and trajectory viewer
 ```
 
-The report prints and writes `report.md`, plus `trials.csv` (one row per trial) and `rows.yaml` (Harbor Hub leaderboard rows with their trial IDs) into the job directory. It has three tables:
+The format is required: `--format md` prints Markdown and writes `report.md`; `--format table` renders the same data with `console.table` without writing `report.md`. Both formats write `trials.csv` (one row per trial) and `rows.yaml` (Harbor Hub leaderboard rows with their trial IDs) into the job directory. It has three tables:
 
 | Table | Columns |
 | --- | --- |
