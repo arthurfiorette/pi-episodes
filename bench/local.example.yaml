@@ -23,6 +23,7 @@
 # Hosts pi may reach while tasks that block the network run, such as a model endpoint.
 # allowedHosts:
 #   - llm.example.com
+#   - models.dev # Provider pricing catalog, fetched during agent startup.
 
 # Run only some tasks: name globs, replacing languages and sample.
 # tasks:
